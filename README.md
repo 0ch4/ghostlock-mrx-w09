@@ -284,3 +284,19 @@ adb shell /data/local/tmp/reroot.sh
 
 詳細は [docs/static-analysis/TASK_PERSISTENCE_20260926.md](docs/static-analysis/TASK_PERSISTENCE_20260926.md)
 と [tools/reroot.sh](tools/reroot.sh) を参照。
+## 12. 追加特権化の進捗（complete root）
+
+この root は **uid 0 + capabilities 0 + `u:r:shell:s0`** です。そこから **complete root**
+（任意 capability・`mount`・`/dev/block` 等）へ拡張する研究を継続しており、主要素は**実機で個別に検証済み**です:
+
+| 要素 | 状態 |
+|---|---|
+| uid 0 + shell ドメイン + root サーバ（`rsh`/`su`） | ✅ 検証済み |
+| **CAP_SYS_ADMIN 注入**（アドレス選択方式・read-back で証明） | ✅ 検証済み |
+| **SELinux `shell` 型の permissive 化**（resident stamp window 経由、`--freeze`） | ✅ 検証済み（`mount` の errno が EACCES→EPERM に変化＝SELinux 拒否が消えた） |
+| 統合（`mount(2)` → 非nosuid → 4755 root シェル） | 🔧 進行中 |
+
+重要な技術的制約: 与えられた write primitive は「**カーネルポインタ**または**リテラル0**」しか書けず、
+**小さい整数値**（`ebitmap_node.startbit` など）は書けません。したがって任意バイトを置ける
+**resident stamp window**（`copy_from_user` 由来）が complete root の鍵になります。
+詳細と実測記録は `docs/FACTS.md`（9an(1)〜(150)）と `docs/static-analysis/*_20260926.md` を参照。

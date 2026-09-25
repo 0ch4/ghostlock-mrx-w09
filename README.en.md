@@ -291,3 +291,20 @@ adb shell /data/local/tmp/reroot.sh
 
 See [docs/static-analysis/TASK_PERSISTENCE_20260926.md](docs/static-analysis/TASK_PERSISTENCE_20260926.md)
 and [tools/reroot.sh](tools/reroot.sh).
+## 12. Progress toward complete root (2026-09-26)
+
+The verified root is **uid 0 with no capabilities in `u:r:shell:s0`**. Work continues toward
+**complete root** (arbitrary capabilities, `mount`, `/dev/block`, ...); every major ingredient is
+individually verified on-device:
+
+| ingredient | status |
+|---|---|
+| uid 0 + shell domain + root server (`rsh`/`su`) | verified |
+| **CAP_SYS_ADMIN injection** (address-selection; proven by read-back) | verified |
+| **making the SELinux `shell` type permissive** (via a resident stamp window, `--freeze`) | verified (the `mount` errno changed EACCES -> EPERM, i.e. SELinux no longer denies) |
+| integration (`mount(2)` -> non-nosuid -> a 4755 root shell) | in progress |
+
+Key technical constraint: the write primitive can only store a **kernel pointer** or **literal 0** -
+it cannot store **small integers** (e.g. `ebitmap_node.startbit`).  Arbitrary bytes are therefore only
+available through a **resident stamp window** (from `copy_from_user`), which is the key to complete
+root.  See `docs/FACTS.md` (9an(1)-(150)) and `docs/static-analysis/*_20260926.md`.

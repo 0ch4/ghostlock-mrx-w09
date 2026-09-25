@@ -3923,3 +3923,485 @@ AGENT-proven leaf store *(value-8+8)=0 -> HKIP reverse-engineered from source: z
 task->pid (0x820) so hkip_get_task_bit(...,true) exempts it -> zero cred->uid+gid -> setresuid(0,0,0)
 commits uid 0 -> the pid-0 task forks a legal-root grandchild per request (hkip_init_task writes its
 bit) -> the abstract-socket gl_su root server + rsh client (nosuid on /data makes setuid useless).
+
+### (134) 2026-09-26 cede(init_cred) is a DEAD END - the kernel domain denies all I/O
+
+Run of build b9107c75: the pid-0 shield (w=0) and the cede (w=0,0) both landed, ps shows the child at
+UID 0, but realroot.txt was EMPTY even though the probe used DIRECT syscalls (open/read/mount) and
+wrote the report to a PIPE and to /dev/kmsg.  dmesg is denied for the shell domain, so /dev/kmsg is
+unreadable.  => the kernel SELinux domain denies file writes, PIPE writes and exec, so a task in it
+cannot do userspace work nor even report its own measurements.  Ceding to &init_cred is therefore
+useless for the "complete root" goal.
+REMAINING routes to full caps + a usable domain (all need TWO writes: a domain/permission fix and a
+cap_effective fix):
+ (1) IN-MEMORY POLICY PATCH via the write primitive - no reload needed.  Best candidate: set the
+     shell type's bit in policydb.permissive_map (an ebitmap) so every SELinux check for shell is
+     audit-only (9an 9an(112)-era "path 1" was called closed, but we now understand the primitive and
+     have the pid-0 shield; re-examine statically).  Then selinux_capable passes for shell.
+ (2) Point cred->security at a REAL "has-everything" tsec (e.g. pid 1s init domain) - a pointer write,
+     but the address must be found (task-list walk with the read primitive).
+ (3) Set our tsec->sid = 1 (kernel sid) by writing a chosen pointer whose LOW 32 BITS == 1 into
+     cred->security+4 (the 8-byte pointer write sets sid=low32(V), osid=high32(V)).
+ (4) cap_effective: write a kernel address V whose low 32 bits carry the needed cap mask (CAP_SYS_ADMIN
+     = bit21 etc.); the HIGH 32 bits of a kernel pointer set caps 32-63 for free.  V must also satisfy
+     *(V)&1 (the rb re-insert gate).  A host-side search over the direct map can find such V.
+
+### (135) 2026-09-26 COMPLETE-ROOT lever identified: permissive_map on the shell type (+ cap_effective)
+
+AGENT report ghostlock_pocs/TASK_POLICY_PATCH_20260926.md.  Offsets re-derived from the device image:
+permissive_map .node=+0x1C0 .highbit=+0x1C8 ; allow_unknown=bit1@+0x1DC ; te_avtab=+0xE8 ;
+type_attr_map=+0x1A8 ; class_val_to_struct=+0xC8 ; struct ebitmap_node {next@0, maps[6]@8,
+startbit@0x38}, EBITMAP_SIZE=384.
+- BEST: mark the SOURCE type 1153 permissive.  The flag is read from the source context
+  (services.c:1119) and avc_denied() (avc.c:1007-1012, enforcing is folded to 1 on this build)
+  turns every denial into a grant => ALL classes at once (capability, file, process, mount).
+  Needs TWO 8-byte POINTER writes: policydb+0x1C8 <- V (a kernel ptr with low32(V) >= 1153 and an
+  odd first word) to raise highbit, and policydb+0x1C0 <- A (a fake ebitmap_node whose next is odd,
+  startbit <= 1153 < startbit+384, and the 1153 bit set).  CAVEAT: pre-existing AVC entries keep
+  flags=0 (no timeout) so the patch must be installed before the check / after an avc_ss_reset.
+- allow_unknown=1 is a DEAD END: context_struct_compute_av() never reads it (services.c:640-743);
+  only unmapped CLASSES (services.c:1130-1133) and unknown permission bits (services.c:249) are
+  affected, and the capability class/perms are known here.
+- avtab rewrite: needs >=3 writes and grants only the (1153,1153,class) pair.
+- ss_initialized=0: blocked - it lives in the HKIP write-rare region (0xffffff800adc0000..) written
+  only through wr_assign() (services.c:96-101,2092; hooks.c:6699); a raw store is expected to fault.
+- commoncap is NOT removed: cap_capable runs before/independently and needs
+  cap_raised(cred->cap_effective, cap) (commoncap.c:95), and hkip_check_uid_root() runs even earlier
+  (commoncap.c:85) so the pid-0 shield is still required.  Writing a kernel pointer V into
+  cred+0x38 sets cap_effective[0]=low32(V) (caps 0-31: place CAP_SYS_ADMIN=21, CAP_DAC_OVERRIDE=1,
+  CAP_SETUID=7 ...) and cap_effective[1]=high32(V)=0xffffffXX (caps 32-63 free).
+BLOCKER: node must be a STABLE, controlled ebitmap_node.  The 9an(112)-era --permtest pointed .node
+into the TRANSIENT stamp window and panicked on frequent global AVC misses (a data fault the pid-0
+shield does NOT prevent).  FIX DIRECTION: point .node at a REAL ebitmap node that already has bit
+1153 set but is stable - e.g. the ebitmap node of a type ATTRIBUTE that contains the shell type
+(type_attr_map_array entries are real, prmem-protected, and never transient); find its address with
+the read primitive.  Then only .highbit (and cap_effective) remain to write.
+
+### (136) 2026-09-26 attribute targets for permissive_map + APK tooling available
+
+CIL enumeration (binder_uaf/session_20260913/device_plat_sepolicy.cil): the shell type (1153) is a
+member of these attributes - `domain`(:786) `mlstrustedsubject`(:850) `appdomain`(:854) `netdomain`(:858)
+`coredomain`(:866) `halclientdomain`(:948) `hal_atrace_client`(:963 = "shell traceur_app atrace") and
+`base_typeattr_676`(:31133).  Since libsepol allocates ebitmap nodes in 384-bit chunks, the node
+covering bit 1153 in any of those attribute ebitmaps has startbit = (1153/384)*384 = 1152 and maps[0]
+bit (1153-1152) = 1 SET.  Such a node is a REAL, stable, prmem-backed object => pointing
+`permissive_map.node` at it (with highbit >= 1153) makes the shell type permissive for ALL classes,
+with NO transient window and therefore no AVC-miss panic.  Preferred target: the SMALLEST such
+ebitmap (`hal_atrace_client`, 3 members) to minimise chance of unrelated side effects.
+Address still needed: walk policydb.type_val_to_struct[<attr sid>] -> the attribute's ebitmap -> node
+(the read primitive can do this; type_attr_map is at policydb+0x1A8 per 9an(135)).
+TOOLING: JDK 21 (javac/keytool) and an Android SDK (build-tools + platforms + aapt2/d8/apksigner) are
+present on this host => the "KernelSU-like" manager APK can be built and adb-installed.
+
+### (137) 2026-09-26 root RESTORED after the cede regression + su-shim path fix
+
+Measured: with the cede removed from --simple (it is now opt-in as --cede), the verified root is back:
+`-rw-r--r-- 1 0 2000 rooted.txt`, `-rwsr-xr-x 1 0 2000 rsh`, `rsh -c id` -> uid=0(root) gid=0(root)
+context=u:r:shell:s0, rooted.txt says "uid=0 euid=0 context=u:r:shell:s0".
+=> adding the cede INTO --simple had silently broken the root deliverable (the kernel domain denies
+write_proof/system()), so cede is now behind its own flag and --simple is the stable root path.
+The su shim was NOT created at /data/local/su,/bin,/xbin - SELinux denies `create` there for shell
+(/data/local is not fully writable; only /data/local/tmp is).  FIXED: install su at
+/data/local/tmp/su (definitely writable, and it is in the common root-checker probe lists) in addition
+to the /data/local/* attempts.  `su -c id` then goes through the abstract socket gl_su to the shielded
+uid-0 server -> uid=0, which is what Root Checker Basic (com.joeykrim.rootcheck) and RootBeer-style
+detectors look for (they check the binary presence in standard paths AND run `su -c id`).
+
+### (138) 2026-09-26 su shim VERIFIED (symlink) - and why the runner looked slow
+
+MEASURED on device: `/data/local/tmp/su -> /data/local/tmp/ghostlock_e` (a symlink; argv[0]=="su"
+selects the socket client) and
+  `su -c id`     -> uid=0(root) gid=0(root) ... context=u:r:shell:s0
+  `su -c "id -u"`-> 0
+so the Root Checker style test (binary present in a probed path + `su -c id` returns uid 0) PASSES for
+/data/local/tmp/su.  /data/local/su, /data/local/bin/su and /data/local/xbin/su are MISSING: SELinux
+denies `create`/`mkdir` in /data/local for the shell domain (only /data/local/tmp is writable), so
+those probe paths need the permissive_map patch (complete root) or a bind-mount into /system.
+NOTE: the in-C `system("cp ... /data/local/tmp/su ...")` did not take effect while the rsh copy from
+the same compound command did; the reliable way is the symlink created from reroot.sh (verified).
+RUNNER TIMING: the exploit itself completes ~60-90 s after launch; the "slow" readout was the runner's
+fixed Start-Sleep 240 - future runners should poll for rooted.txt/rsh instead of sleeping.
+
+### (139) 2026-09-26 COMPLETE ROOT plan frozen (see ghostlock_pocs/COMPLETE_ROOT_PLAN.md)
+
+Decision: go all-in on complete root.  The plan (all statically justified): make the shell source
+type 1153 permissive via policydb.permissive_map -> 3 pointer writes:
+  #1 policydb+0x1C8 (highbit)   <- V  with low32(V) >= 1153
+  #2 policydb+0x1C0 (.node)     <- A  the address of a REAL ebitmap_node with startbit==1152 and
+                                    maps[0] bit1 set (shell 1153 belongs to `hal_atrace_client`
+                                    (device_plat_sepolicy.cil:963), smallest such attribute)
+  #3 cred+0x38 (cap_effective)  <- V2 with CAP_SYS_ADMIN(21)/CAP_DAC_OVERRIDE(1)/CAP_SETUID(7) in
+                                    low32; a kernel pointer also sets caps 32-63 for free
+Route A (first choice): find the real node address with the existing boot_id read primitive
+(type_val_to_struct[attr] -> type_datum ebitmap -> node with startbit 1152); stable + prmem-backed so
+no AVC-miss panic.  Route B (fallback): resurrect the fake-node approach now that the pselect6
+carrier is BLOCKING (a resident window, unlike the old transient MCAST one) - the window content is
+fully controlled via g_sbuf, so a proper ebitmap_node can be built.
+Oracle: write "u:r:shell:s0" to /proc/self/attr/exec (baseline EACCES), then capget, then
+mount -o remount,rw /, head -c16 /dev/block/sdd74, /data/misc/keystore, /data/system/packages.xml.
+Implementation must be a NEW mode (--full) so --simple (the verified root) stays untouched.
+Also note: /data/local/{,bin,xbin} create is denied by SELinux even at uid 0, so the standard su
+paths require this patch; and downloading a root-checker APK from public mirrors is blocked (403).
+
+### (140) 2026-09-26 permtest with the BLOCKING carrier still panics - because the carrier was not calibrated
+
+Run: enabler OK (perf_event_paranoid=-1), `--permtest` (now g_selstamp=1).  stdout shows
+`stamp_off=0xa0` - which is the MCAST calibration - while the exploit had been switched to the
+pselect6 carrier, whose stamp geometry is DIFFERENT (g_seloff / --selcal).  The klog shows
+"permtest: enter" followed by three arm r+/r-/w+/w-/j+ cycles and then the process vanished; the
+pstore carried a `panic+0x1f0/0x530` with pid ghostlock_e, i.e. the fake node again pointed at
+garbage -> AVC walk -> panic.  ROOT CAUSE: changing g_selstamp without calibrating that carrier's
+stamp offset.  NEXT: run `--selcal` first to get the pselect6 stamp_off (and the matching buffer
+base), then feed it to --permtest; only then does the "resident window" argument hold.  Alternative
+that avoids all of this: route A - point permissive_map.node at a REAL attribute ebitmap node that
+already contains bit 1153 (hal_atrace_client), obtained with the boot_id read primitive.
+DEVICE OK: adb healthy, uptime 103, no leftover processes.  NOTE: `adb kill-server` during a run
+aborts the run (protocol fault) - do not run it while a device run is in flight.
+
+### (141) 2026-09-26 ROUTE A solved structurally - no "node with the bit" needed, just a node with the right startbit
+
+Verified in the device kernel source (ss/ebitmap.c, ss/ebitmap.h, ss/policydb.h):
+  struct ebitmap_node { struct ebitmap_node *next; unsigned long maps[6]; u32 startbit; };  // +0x38
+  EBITMAP_SIZE = EBITMAP_UNIT_NUMS*64 = 384  (EBITMAP_NODE_SIZE 64 -> maps[6])
+  ebitmap_get_bit: needs highbit >= bit, then startbit <= bit < startbit+384 so that
+  maps[(bit-startbit)/64] is in range (index < 6).  For bit 1153 that means startbit in [1090,1153]
+  and the index is 0 for startbit >= 1089.  `next` is NOT dereferenced when the bit is found.
+BREAKTHROUGH: policydb is ordinary kmalloc memory (NOT prmem-protected), so we do NOT need a node
+that already has bit 1153 set - we only need a REAL node with a valid startbit (~1152) and then WRITE
+its maps[0] to have bit 1 (one 8-byte pointer write whose low32 has bit1).  Candidates:
+policydb.type_attr_map (policydb.h:304, offset +0x1A8) = an array of ebitmaps mapping an ATTRIBUTE to
+its member types; the entry for `hal_atrace_client` (the smallest attribute containing shell/1153,
+device_plat_sepolicy.cil:963) has exactly a node startbit=1152 covering 1153.
+Plan (route A, stamp-free => no panic, no foreign-stack corruption):
+  1. read policydb.type_attr_map (policydb+0x1A8) and the attribute's ebitmap .node  (boot_id read)
+  2. write maps[0] |= 2 at that node (pointer write with bit1 in low32)   -- OR skip if the node
+     already covers a type we can use
+  3. write policydb+0x1C0 (.node) <- that node  (pointer write; low32 need not be special)
+  4. write policydb+0x1C8 (highbit, u32) <- V with low32(V) >= 1153  (g_blackval works)
+  5. write cred+0x38 (cap_effective) <- V2 whose low32 carries CAP_SYS_ADMIN(21)/DAC_OVERRIDE(1)/
+     SETUID(7); a kernel pointer also sets caps 32-63 for free
+Oracle: write "u:r:shell:s0" to /proc/self/attr/exec (baseline EACCES) => >=0 means PERMISSIVE.
+NOTE the pselect6 carrier path is ABANDONED: --selcal produced no write, and the canary value
+0xdead0003 appeared in init's (pid 1) stack, i.e. it corrupts other processes' stacks - too dangerous.
+
+### (142) 2026-09-26 BREAKTHROUGH: address-selected cap_effective injection (1 extra write) -> CAP_SYS_ADMIN
+
+AGENT report ghostlock_pocs/BREAKTHROUGH_FULL_ROOT_20260926.md.  The false premise was that a cap word
+had to be ENCODED with a pointer-only primitive.  Instead: cap_effective (cred+0x38) is 8 bytes and a
+pointer write deposits {cap[0]=low32(V), cap[1]=0xffffff80}; we must simply CHOOSE V so that its low32
+already carries the wanted bits.  FACTS 9al(2) already MEASURED `cred->cap_effective = <window ptr>`
+landing (capget showed the pointers low word), so the write works - only bit selection was missing.
+CAP_SYS_ADMIN is bit 21, so we need a window address Wc with (Wc & 0x200000) != 0; that is an arm-level
+property (~50% per arm) and re-arming is proven 5/6 (FACTS 9al(1)), so retry arms until it holds.
+The side store lands inside our own window (safe, FACTS 9r).
+CLOSURE: mount("tmpfs", "/mnt/gl", "tmpfs", 0, NULL) -> a non-nosuid filesystem -> drop a 4755
+root-owned /system/bin/sh there -> full-cap root.  (Per the analysis the mount oracle already exists
+in the exploit around ghostlock_mrx_e.c:2665.)
+REJECTED by the same analysis: UMH (needs small-int writes AND a text-pointer write into RO text,
+STRICT_KERNEL_RWX=y), ashmem fops full RW (needs a persistent controlled buffer and text-pointer
+writes; pselect6 does not reach the window), and the kernel-domain cede (I/O impossible).
+IMPLICATION for the plan: route A (permissive_map) is still needed for the MOUNT (selinux_sb_mount
+would otherwise deny), and then ONE address-selected write for cap_effective.
+
+### (143) 2026-09-26 --full: the address-selected slot works but capget still shows 0 - three hypotheses
+
+v4 run: `full: slots b21=00101110 chosen=fffffff7b03abc78` (the window base carries bit21 - the
+candidate-address scan works, 5/8 and 3/8 candidates had bit21 in successive runs), then
+`full: cap set on NEW cred C2=fffffff6cf72be40 (w=0,0)` (the writes landed), but
+`rsh -c "grep ^Cap /proc/self/status"` still shows CapEff 0000000000000000.
+NOTES: (a) the re-leak+publish now happens after the childs LAST setresuid (9an(142) ordering fix),
+so a further commit cannot be discarding it; (b) the log line "no bit21 slot found" is a leftover
+old check on g_blackval and is misleading - the candidate loop did select a bit21 address.
+HYPOTHESES to separate next run: 1) C2 is not the live cred -> verify by reading the task cred
+pointer with arm_read_raw(X+0x9E8) and comparing; 2) the measurement point is wrong -> rsh runs in a
+per-request GRANDCHILD (a copy of the childs cred); have the CHILD itself capget AFTER MAIN injects
+(signal shm[2]=3) to remove the copy question; 3) inject into BOTH the initial C and C2 for an A/B.
+Everything else is unchanged: --simple still yields the verified uid-0 root (rooted.txt + rsh + su).
+
+### (144) 2026-09-26 --full v5: A/B into C0 and C2 both report w=0 yet capget stays 0 - verify the target by reading
+
+Run: `full: slots b21=00001110 chosen=ffffff9af7ffcd28` (candidate scan fine), then
+`full: cap set C0=ffffffc73565be40(w=0) C2=ffffffc6d3b93f00(w=0,0)` - BOTH the initial and the final
+cred were written and BOTH report w=0 (store observed) - yet `rsh -c "grep ^Cap /proc/self/status"`
+still shows CapEff 0000000000000000.  The childs own post-injection lines (re-leaked (final),
+OWN CapEff) did not appear, so the child-side confirmation is still missing (the childs later klog
+lines are unreliable; note write_proof()->persist_proof() exec's /system/bin/sh so nothing after it
+runs, and the block was placed before it, so the log failure is a separate issue).
+CONCLUSION: w=0 does NOT prove the value reached cred+0x30/0x38.  NEXT (decisive, cheap): READ the
+target back with the boot_id read primitive - compare arm_read_raw(C2+0x30) and (C2+0x38) BEFORE and
+AFTER the injection; if they do not change, the store lands elsewhere and the target arithmetic (or
+the C2 value itself, i.e. whether leak_own_cred_x0 after commit_creds really returns task->cred) is
+wrong.  Also worth checking: whether the read of /proc/self/status is performed by a grandchild whose
+cred is a copy (rsh forks per request) - have the CHILD itself cat its status via the pipe watcher.
+Everything else unchanged: --simple still yields the verified uid-0 root (rooted.txt + rsh + su).
+
+### (145) 2026-09-26 *** CONFIRMED: the address-selected cap injection REACHES the cred *** (read-back proof)
+
+v6 run, read-back with the boot_id read primitive:
+  full: C2=ffffffe65b1019c0 perm 0->ffffffe7772ffc90  eff ffffff9803e9cfe8->ffffff9803e9cfe8 slot=ffffffe7772ffc90 w=0,0,0
+and the childs OWN capget via the pipe watcher:
+  simple: OWN CapEff=ffffff9803e9cfe8 prm=ffffffe7772ffc90
+=> cap_permitted went 0 -> our bit21-bearing slot: the store DOES reach cred+0x30, so the primitive,
+the target arithmetic and the post-commit C2 are all correct.  CapEff is non-zero and its low word
+0x03e9cfe8 has bit21 set (nibble E = 1110).  CapBnd also mirrors that value, i.e. the cred fields are
+really rewritten.
+ALSO (the childs leftover self-probe now runs in the SHELL domain as uid 0):
+  load=7 e=0   - /sys/fs/selinux/load OPENS (a policy reload is possible from the shell-domain root!)
+  data=7 e=0   - /data files open
+  policy=-1    - /sys/fs/selinux/policy is NOT readable (no need: route A writes known offsets)
+  mount=-1 e=13, blk=-1 e=13  - EACCES from SELinux
+IMPORTANT MEASUREMENT LESSON: `rsh -c ...` execl()s, and exec RECOMPUTES the capability sets, so a
+grandchild shows CapEff=0 - capability-dependent checks must be performed BY THE CHILD ITSELF (no
+exec), e.g. a direct mount(2) syscall.
+NEXT: (1) have the child call mount(2) directly to use its new CAP_SYS_ADMIN; (2) apply route A
+(permissive_map in-memory patch: .node <- policydb.type_attr_map[1152].node with startbit=1152 after
+setting its maps[0] bit1, .highbit <- V with low32>=1153) to clear the SELinux EACCES; (3) mount a
+non-nosuid tmpfs and drop a 4755 root shell = complete root.
+
+### (146) 2026-09-26 route A is DEAD (the read primitive cannot read POINTERS) -> pivot to loading a patched policy
+
+v7 run: MAIN logged `full: C2=... w=0,0,0` and then nothing; the child logged `child flag` and then
+nothing; rooted.txt/realroot.txt kept the PREVIOUS runs mtimes and the device had clearly rebooted
+(uptime 296 vs a ~450 s run) => PANIC in the route A block.
+ROOT CAUSE (fundamental, already hinted at in the old notes): arm_read_raw(A) works by writing the
+VALUE A into the boot_id ctl_table, and the write gate requires `*(A) & 1` (rb re-insert).  Pointer
+values are 8-aligned/even, so READING A POINTER IS IMPOSSIBLE with this primitive ("a cred pointer is
+even").  Route A must follow type_attr_map -> .node -> next, i.e. pointers, so it cannot be done.
+=> route A abandoned.
+REPLACEMENT (no pointer reads needed): LOAD A PATCHED POLICY.  The childs own probe proved that the
+uid-0 shell-domain task CAN open /sys/fs/selinux/load (load=7 e=0) and read /data files (data=7 e=0),
+only /sys/fs/selinux/policy is unreadable (irrelevant if we build the policy ourselves).
+Plan: (1) build `secilc` (libsepol CIL compiler - sources exist at
+huawei_kernel_src/Code_Opensource/external/selinux/libsepol/cil) for aarch64 with the NDK;
+(2) feed it the devices CIL files plus `(typepermissive shell)` and compile ON the device (the shell
+user can write /data); (3) the uid-0 shell-domain task writes the result to /sys/fs/selinux/load;
+(4) shell is then permissive, and with the already-proven CAP_SYS_ADMIN injection `mount(2)` succeeds
+-> mount a non-nosuid tmpfs -> drop a 4755 root shell = complete root.
+
+### (147) 2026-09-26 POLICIES: /sys/fs/selinux/load is gated (neverallow), but the binary policy is READABLE and AVC can be poisoned
+
+AGENT report ghostlock_pocs/POLICY_LOAD_ROUTE_20260926.md.
+- sel_write_load() -> avc_has_perm(current_sid(), SECINITSID_SECURITY, SECCLASS_SECURITY,
+  SECURITY__LOAD_POLICY, NULL) (selinuxfs.c:481-484).  The device policy has a NEVERALLOW for
+  load_policy (device_plat_sepolicy.cil:8525) and no allow anywhere; shell has only compute_av /
+  check_context.  open() on the node succeeds only because sel_load_ops has no .open (selinuxfs.c:544).
+  CAP_SYS_ADMIN is irrelevant there.  => the load route cannot be the FIRST step (you must already be
+  permissive; and the only other switch, ss_initialized, is HKIP write-rare protected).
+- BUT: THE BINARY POLICY IS READABLE BY SHELL: /vendor/etc/selinux/precompiled_sepolicy
+  (label vendor_configs_file; device_plat_sepolicy.cil:8265-8266 grants domain file read/getattr/map/
+  open) and /odm/etc/selinux/precompiled_sepolicy (sepolicy_file, :14075).  A matching blob exists on
+  the host: binder_uaf/session_20260824/precompiled_sepolicy, 989730 bytes, magic 0xf97cff8c,
+  version 30, MLS, sym/ocon 8/7.
+- BYTE RECIPE for permissive: file offset 0x38 is the permissive_map (currently highbit=0,count=0);
+  insert 12 bytes at 0x44 = startbit 1152 (80 04 00 00) + map 0x2 (bit for type 1153); set
+  highbit@0x3C=1153 and count@0x40=1.  There is NO checksum: the kernel checks only magic, string,
+  version+compat, sym/ocon and structure.
+- No cheaper trick works (minimal policies are rejected by the name-based convert_context,
+  enforce/disable handlers are compiled out with DEVELOP unset, there is no permissive node, nothing
+  persists).
+=> NEW ROUTE (uses only globals we can address without reading pointers):
+  1) read the binary policy (shell can) and patch its permissive_map in user space (recipe above);
+  2) POSION THE AVC so that (oursid, SECINITSID_SECURITY, SECCLASS_SECURITY, LOAD_POLICY) is allowed:
+     fabricate an avc_node whose ae.avd.flags has AVD_FLAGS_PERMISSIVE (avc_denied grants when the flag
+     is set, avc.c:1007-1012) and splice it into avc_cache.slots[hash] - avc_cache is a GLOBAL symbol
+     so its address is computable from the symbol table (no pointer read needed); the sids/classes come
+     from the CIL;
+  3) write the patched policy to /sys/fs/selinux/load => shell becomes permissive;
+  4) with the already-proven CAP_SYS_ADMIN injection, call mount(2) directly (no exec) => non-nosuid
+     tmpfs => drop a 4755 root shell => COMPLETE ROOT.
+FLAGGED UNCERTAINTIES: the contradictory in-memory permissive_map offset (+0x1C0/+0x1C8 vs
++0x308/+0x310) - resolvable by reading the binary policy layout; AVC node struct layout/hash; and the
+exact initial sids/class values from the CIL.
+
+### (148) 2026-09-26 policy byte recipe VERIFIED (agent) + the real remaining blocker identified
+
+AGENT: ghostlock_pocs/polpatch.py + POLICY_BYTE_OFFSET_20260926.md.
+- The blob is policyvers 30 (POLICYDB_VERSION_XPERMS_IOCTL), MLS.  The u32 at 0x04 is strlen; the
+  version is at 0x10.
+- CORRECTION to 9an(147): permissive_map really IS at file offset 0x38 - 0x38 is the ebitmap mapunit
+  (64), highbit is at 0x3c, count at 0x40.  (My earlier "the offset is wrong" was a misreading.)
+- type 1153 == shell was CONFIRMED from the blobs own types symtab (not assumed).
+- VERIFIED patch: replace [0x38,0x44) with 24 bytes (inserting 12):
+    0x38 40 00 00 00   mapunit=64
+    0x3c c0 04 00 00   highbit=1216
+    0x40 01 00 00 00   count=1
+    0x44 80 04 00 00   startbit=1152
+    0x48 02 00 00 00 00 00 00 00   map=0x2 (bit 1 => type 1153)
+  New size 989742.  Round-trip verified (re-parse shows bit 1153 set, consumes exactly the new size,
+  idempotent).  The parser walks every section of policydb_read and lands exactly on EOF, which proves
+  the layout.  The on-disk ebitmap unit is ONE u64 word {u32 startbit; u64 map}, not 384 bits
+  (that grouping is in-memory only).
+- BLOCKER FOUND for everything downstream: our write primitive can only store a kernel POINTER
+  (odd-content gate) or literal 0 - it CANNOT write SMALL INTEGERS.  But avc_node needs ssid/tsid/
+  tclass/avd.flags as small ints, and a fabricated ebitmap_node needs startbit=1152 as a small int.
+  So the AVC poison (9an(147) step 2) and the in-memory permissive_map node are both impossible, and
+  loading the patched policy needs exactly that AVC decision => circular.
+=> THE ONLY REQUIREMENT LEFT for complete root: get ARBITRARY BYTES (small values included) into a
+  known kernel address.  The only such channel is the stamp window (copy_from_user).  It is transient
+  unless held by a BLOCKING syscall, i.e. the pselect6 carrier, whose failure is explained by the
+  MISSING GEOMETRY CALIBRATION (which also explains why it corrupted inits stack).
+  => calibrate the pselect6 carrier (--selcal sweep: g_selfds/g_seloff) and then route B (a resident
+  fake ebitmap node) becomes viable; with shell permissive the CAP_SYS_ADMIN mount path completes
+  complete root.
+
+### (149) 2026-09-26 pselect6 carrier CALIBRATED geometrically, but structurally ONE SLOT SHORT of waiter->lock
+
+DEVICE binary ghostlock_e sha256
+29F4E3F4CC9AEEE745D5EEFDD8C515771E07737B7575F1EFD7EEB454643776B5
+(built from ghostlock_mrx_e.c sha256
+07D9BD3DCFBA12F9D9ED84BE1FD10BF50DBF31E3668FD0BB7268D98E4C457A17; source UNCHANGED,
+--simple/--cede/--full untouched).  Build cmd as in the runbook; pushed to
+/data/local/tmp/ghostlock_e.  Enabler runbook ran each boot; perf_event_paranoid read -1.
+
+DEVICE RUNS (one per reboot):
+- --mcastcal  (CONTROL, returning MCAST carrier):
+  `Unable to handle kernel paging request at virtual address dead0016`
+  PC `rt_mutex_adjust_prio_chain+0x140/0xbac`; call chain rt_mutex_adjust_pi+0x124 ->
+  __sched_setscheduler -> SyS_sched_setattr.
+  x25 = 0xfffffff5e73c3cf0 (== W), x24 = 0x00000000dead0016.  X25-0x80 window dump shows
+  dead0013/14/15 then dead0017/18/19 at 8-byte slots => slot 0x16 sits at buffer 0xB0 = W+0x38.
+  => MCAST copy base W-0x78 = E-0x248 and  W = E-0x1d0  (reproduces 9m/9o).
+- --selcal 320 0x0:  waiter_abs=0xffffffeba7393cf0
+  `[y] sel stamp: nfds=320 set_bytes=0x28 total=0x78 off=0x0`
+  `no write seen (uid=2000) ack=1 gset=32767`, `ran stamp+trigger ok=1`.
+  NO fault, NO panic banner of our own.
+- --selcal 128 0x0:  waiter_abs=0xffffffe9a42e7cf0
+  `[y] sel stamp: nfds=128 set_bytes=0x10 total=0x30 off=0x0`, `no write seen`, NO fault.
+- select(1067) PROBE (static aarch64): `nr_select(1067) nfds=0 -> r=-1 errno=38` (ENOSYS).
+  arch/arm64/include/uapi/asm/unistd.h defines only __ARCH_WANT_RENAMEAT, so
+  __NR_select (asm-generic 1067, inside __ARCH_WANT_SYSCALL_DEPRECATED) is NOT wired.
+  => there is NO select(2) fd_set carrier on arm64; pselect6 is the only one.
+
+DEVICE-IMAGE DISASM ([FIRMWARE]\MRX-W09\extracted\vmlinux.elf, link addrs):
+- `SyS_pselect6.cfi` @0xffffff800846d774: `sub sp,sp,#0xa0`; bl core_sys_select.cfi.
+- `core_sys_select.cfi` @0xffffff800846c798: `sub sp,sp,#0x1c0`; at +0xd0 `add x19,sp,#0x50`
+  => the three fd_sets (bits) start at  A0 = E-0x210  (E = task_stack+THREAD_SIZE-0x140),
+  with size = ((n+63)>>6)*8 = FDS_BYTES(n) and stack path iff size <= 42 -> n <= 320.
+- core_sys_select then zeroes res_in/out/ex at bits+3*size / +4*size / +5*size
+  (fs/select.c:652-654; memset at .cfi+0x264).
+
+EXACT CALIBRATION:
+- g_selfds = 320  (max stack coverage; sel_widen_fdtable needs nfds+64 fds).
+- window offset:  W lands at fd_set-buffer offset 0x40, because
+  0x40 = W - A0 = (E-0x1d0) - (E-0x210).
+  Attacker-controlled input region is only [W-0x40, W+0x37) = 3*size <= 0x78 bytes.
+- to put g_sbuf's waiter (g_w_off=0x20) at W: g_seloff = 0x40 - 0x20 = 0x20.
+  Cleaner redesign that lands every field in-window: g_w_off=0x40, g_lk_off=0x10,
+  g_seloff=0x00 (fake rt_mutex at W-0x30, waiter at W).
+
+HARD BLOCKER (why pselect6 alone can never store):
+- the field the walk derefs first is waiter->lock at W+0x38 = buffer offset 0x78
+  (byte 0 of the 0x79th byte) - EXACTLY one 8-byte slot past the 0x78-byte maximum input
+  copy.  No nfds keeps the sets on the stack and reaches 0x80 bytes.
+- core_sys_select's zero_fd_set(res_in) starts at bits+3*size; at nfds=320 that is exactly
+  W+0x38, so the lock slot (and waiter->prio at W+0x40) are ZEROED.  For nfds<=~170 the
+  res region ends before W+0x38 and the slot keeps the STALE real futex lock instead.
+  Either way the lock/prio are never attacker-controlled -> the walk early-outs
+  (rt_mutex_adjust_pi's rt_mutex_waiter_equal on the zeroed/equal prio) and no fake lock
+  is built -> measured `no write seen` 2/2, unlike MCAST's dead0016 fault.
+- The 0xdead0003 previously blamed on "slot 3" is NOT a pselect6 window slot: it is a
+  persistent ramoops artifact (init's exception stack, same dump offsets every boot) and
+  both pselect6 runs produced no fault banner at all.
+
+REMAINING PATH (not yet implemented/tested):
+- (a) a BLOCKING syscall whose user->stack copy reaches W+0x38 with a controllable value
+  (MCAST reaches it but returns); or
+- (b) HYBRID freeze: MCAST-plant the full structured window (its bytes PERSIST on the
+  y-thread kernel stack after setsockopt returns), then pselect6 with nfds<=64
+  (input [W-0x40,W-0x28), res zero [W-0x28,W-0x10)) to block BELOW W-0x10, leaving the
+  MCAST waiter (W..W+0x50) untouched; needs the pselect6 `in` bits for fds 3..nfds set
+  so pselect6 actually blocks.
+
+### (150) 2026-09-26 AGENT: *** HYBRID WINDOW FREEZE WORKS - shell type PERMISSIVE (route B) ***
+
+Implemented `--freeze` in ghostlock_mrx_e.c (ONLY that file).  Build:
+  [WORKSPACE]\android-ndk-r20b\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android24-clang.cmd
+    -O2 -static -pthread -o ghostlock_e_freeze11 ghostlock_mrx_e.c
+  source sha256 903678B4D7773D0908EC87C675EB347D10FE25E55B123EFDC92D6FEF84BBF2CD
+  binary sha256 553EC3206973D3663D1C910DD7427C416D53AF8343CDFC4AC49AC8B0F99F3A47
+  pushed to /data/local/tmp/ghostlock_e; enabler run as in the runbook (paranoid=-1).
+  --simple / --cede / --full logic is untouched (their stamp path is unchanged; the
+  new g_freezepark branches are gated off when g_freezepark==0).
+
+WHAT --freeze DOES
+  a. normal setup + one consumer thread; leaf-zero panic_on_oops (3 writes).
+  b. arm_r() then MCAST-plant the full structured window (set_payload/build_v2 with
+     g_permmode=1 -> fake ebitmap node at base+0xC8 = W+0x50, startbit=779, maps~0),
+     then the y thread PARKS in a blocking pselect6(nfds=64) (all fds 3..63 dup2'd to
+     a never-ready pipe read end, timeout NULL).
+  c. two pointer writes: policydb+0x1c8 (highbit) <- the write arm's g_blackval
+     (low32 >= 1153), then policydb+0x1c0 (.node) <- g_park_node (W+0x50).
+  d. oracle(s) from the SAME task (no exec), plus a boot_id read-back of the node.
+
+THREE REAL BUGS FOUND AND FIXED (each was measured, klog + pstore)
+  1. freeze_park() called sel_widen_fdtable() AFTER the MCAST copy.  Its getrlimit/
+     pipe/dup2 syscalls are deep enough to overwrite the window at W+0x50.
+     FIX: all fd work moved to freeze_prepare(), which runs BEFORE the copy.
+  2. even the klog_line()/printf() after the copy clobbered W+0x50 (a normal write arm
+     panicked; the parked node read back as garbage {0x40, g_bootid_df}).
+     FIX: NO syscall/log at all between the MCAST copy and the blocking pselect6.
+  3. sel_widen_fdtable() dup2'd over fds 3..63, CLOBBERING the shared MCAST socket
+     g_s6 => every later write arm setsockopt()'d the wrong fd and planted NOTHING.
+     FIX: g_s6=-1 after the park (and after freeze_prepare) so each arm makes a fresh
+     socket (fd >= 64).
+
+DEVICE EVIDENCE (build 553ec320, run 11; device alive, no panic)
+  [y] freeze prepare: nfds=64 (blocking pselect6 parked after the MCAST copy)
+  freeze: park W=fffffff162903cf0 base=fffffff162903c78 node=fffffff162903d40
+  freeze: PROBE node+00 addr=...d40 w=0 rok=1 q0=fffffff162903d41 q1=ffffff9b92e9cfe8
+  freeze: PROBE node+08 addr=...d48 w=0 rok=1 q0=ffffff9b92e9cfe8 q1=ffffff9b92e9cfe8
+  freeze: PROBE node+38 addr=...d78 w=0 rok=1 q0=ffffffff0000030b q1=ffffff9b92e9cfe8
+      => the resident node IS at W+0x50: n[0]=node|1, maps[0]=~0, maps[1]=W,
+         startbit=779 (0x30B); q1 is just the boot_id ctl_table pointer we wrote.
+  freeze: PERM_HIGH write w=0 val_low32=7c533d30
+  freeze: PERM_NODE write w=0
+  freeze: access[post-1C0-shell] raw='2217ffd ffffffff 0 ffffffff 1 1' flags=1
+  freeze: ACCESS-ORACLE@1C0 flags kernel=0 shell=1 (bit0=AVD_FLAGS_PERMISSIVE)
+      => /sys/fs/selinux/access (write "u:r:shell:s0 u:r:shell:s0 2") calls
+         security_compute_av_user() DIRECTLY, i.e. it bypasses the AVC cache; its
+         returned avd.flags has AVD_FLAGS_PERMISSIVE=1 => the in-memory
+         policydb.permissive_map patch IS live for the shell type.
+  freeze: ORACLE attr/exec att=0..12 write=-1 e=13 ; att=13 write=12 e=0  *** SUCCESS ***
+      => the literal task oracle (write "u:r:shell:s0" to /proc/self/attr/exec) also
+         returns >=0 once the stale (shell,shell,process) AVC entry is churned out.
+         att=0..12 are the KNOWN false negative (FACTS 9an(86)/(92)): the node was
+         cached flags=0 by the sched_setattr walks before the patch.  avc_miss_gen()
+         (distinct socket/IPC/file labels => avc_alloc_node over threshold => 
+         avc_reclaim_node sweeps) evicts it; then the check is a MISS and the
+         permissive bit grants it.
+  freeze: mount(2) r=-1 errno=1   (was errno=13 when the map was not live)
+      => SELinux no longer denies mount; only CAP_SYS_ADMIN is missing (EPERM).
+
+WHY THE ATTR/EXEC ORACLE IS EACCES FOR 13 ATTEMPTS: the AVC cache is global; the
+first sched_setattr walk caches (shell_sid,shell_sid,SECCLASS_PROCESS=2) with
+flags=0, and avc_has_perm_noaudit HITS reuse those flags (avc.c:1130-1138,
+avc_denied avc.c:1007).  Only a cache MISS calls security_compute_av.
+
+OTHER RUNS (one per boot) and what they isolated
+  freeze1 (src 1799D90B, bin FFFD0746): structure ran, no panic, node resident, but the
+    writes planted nothing (bug 3) and the attr/exec oracle was EACCES.
+  freeze2/3 (22F2C21D/7BE2BA8E): tried to zero avc_cache_threshold (0xffffff800ae5a168)
+    with the zero/leaf-zero write; read back stayed 512.  do_write(0,target) is the
+    known unreliable/fatal zero shape (FACTS 9q.2), so cache eviction via the threshold
+    was abandoned; /sys/fs/selinux/avc/cache_threshold is root-only anyway (0644).
+  freeze4 (09162C7E): added the cache-free /sys/fs/selinux/access oracle; proved the
+    permissive map was still NOT live at that time (flags 0 after the writes).
+  freeze5/6/7/8 (2204A095/BAEF1168/52FEBC7D/E6F24006): iterated the fd/socket-ordering
+    bugs above; node read-back stayed garbage until the no-syscall-between-copy-and-
+    block rule was enforced.
+  freeze9 (7AC4FD3C): a klog_line() added after the MCAST copy made a normal arm panic
+    (device rebooted) - direct proof that ANY syscall there destroys the window.
+  freeze10 (B23FDBA8): first clean success of the cache-free oracle (shell flags=1);
+    attr/exec still EACCES (stale AVC).
+  freeze11 (553EC320): added the AVC-churn loop -> attr/exec write=12.
+
+POLICYDB OFFSET (task asked to determine it): struct policydb.permissive_map is at
+  +0x1C0 (node +0x1C0, highbit +0x1C8, protectable +0x1CC), type_attr_map at +0x1A8;
+  +0x308 is beyond the source-sized struct.  Printed sizeof(struct ebitmap)=16 (the
+  Huawei `bool protectable` at +0xC does not change the size).  The contested +0x308
+  alternative was measured to do nothing (`flags=0`), confirming +0x1C0.
+
+NEXT (follow-on, not part of this mode): the mount errno dropped 13 -> 1, so combining
+  --freeze with the already-verified CAP_SYS_ADMIN cap_effective injection (FACTS
+  9an(142)/(145)) should let a direct mount(2) create a non-nosuid tmpfs; a 4755 root
+  shell still needs uid 0, i.e. the --simple cred-identity endgame.
