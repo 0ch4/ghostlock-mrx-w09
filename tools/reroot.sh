@@ -50,5 +50,17 @@ while [ $i -lt 40 ]; do
     i=$((i+1))
 done
 
+# install the su shim: with argv[0]=="su" the SAME binary acts as a socket su client (no setuid
+# needed, so the nosuid /data mount is irrelevant).  Root Checker / RootBeer probe these paths.
+for p in /data/local/tmp/su /data/local/su /data/local/bin/su /data/local/xbin/su; do
+    d=`dirname "$p"`
+    [ -d "$d" ] || mkdir -p "$d" 2>/dev/null
+    ln -sf "$D/ghostlock_e" "$p" 2>/dev/null
+done
+say "su shim:"
+for p in /data/local/tmp/su /data/local/su /data/local/bin/su /data/local/xbin/su; do
+    [ -e "$p" ] && { printf '  %s -> ' "$p"; $p -c "id -u" 2>&1; }
+done
+
 say "verify:"
 $D/rsh -c id 2>&1
