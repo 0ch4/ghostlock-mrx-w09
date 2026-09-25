@@ -302,7 +302,7 @@ individually verified on-device:
 | uid 0 + shell domain + root server (`rsh`/`su`) | verified |
 | **CAP_SYS_ADMIN injection** (address-selection; proven by read-back) | verified |
 | **making the SELinux `shell` type permissive** (via a resident stamp window, `--freeze`) | verified (the `mount` errno changed EACCES -> EPERM, i.e. SELinux no longer denies) |
-| integration (`mount(2)` -> non-nosuid -> a 4755 root shell) | **ACHIEVED** (`--root`: measured mount rc=0, a 4755 root-owned shell, and a uid-2000 exec of it yields euid=0). The mount is visible only inside that process's mount namespace; running it via `setns(/proc/1/ns/mnt)` first is the remaining step |
+| integration (`mount(2)` -> non-nosuid -> a 4755 root shell) | **ACHIEVED + GLOBAL** (`--root`: measured mount rc=0, a 4755 root-owned shell, and a uid-2000 exec of it yields euid=0). The mount is **visible to every process**: the shell/exploit already share init's mount namespace (`self == /proc/1/ns/mnt == mnt:[4026533392]`, identical mount ids), so a separate `adb shell` and `system_server` (a slave clone) both see it - see `docs/FACTS.md` (152). `setns("/proc/1/ns/mnt")` is therefore unnecessary (it returns EPERM because Huawei's `mntns_install` also requires `CAP_SYS_CHROOT`). `mount -t overlay` is also verified working with a real `/system` lowerdir |
 
 Key technical constraint: the write primitive can only store a **kernel pointer** or **literal 0** -
 it cannot store **small integers** (e.g. `ebitmap_node.startbit`).  Arbitrary bytes are therefore only

@@ -307,6 +307,10 @@ adb shell /data/local/tmp/reroot.sh
 実機検証済みです（`mount` rc=0、`/mnt` は `nosuid`/`noexec` なし、uid-2000 のプロセスが 4755 シェルを
 exec すると euid=0）。
 
-ただし **mount は当該プロセスの mount namespace 内に限られ**、`adb shell` など別プロセスからは
-見えません（＝そこで setuid が効かない）。**`setns("/proc/1/ns/mnt")` してから mount** すれば
-全プロセスから利用可能になり、GMS の `/system` overlay にも必須です（次の課題）。
+この mount は **全プロセスから見えます**（FACTS 152）。shell / adb / exploit は既に init の mount
+namespace を共有しており（`readlink /proc/self/ns/mnt` == `/proc/1/ns/mnt` == `mnt:[4026533392]`、
+mount id も一致）、別の `adb shell` も `system_server`（slave clone）も同じ mount を見ます。以前の
+「namespace 内に限られる」という記述は、`/system/bin/sh` が `-p` なしで euid を落とす mksh の仕様
+（`glsh -c id` は uid=2000、`glsh -p -c id` は euid=0）を誤診したものでした。`setns("/proc/1/ns/mnt")`
+は不要です（Huawei の `mntns_install` は `CAP_SYS_CHROOT` も要求するため EPERM になる）。
+`mount -t overlay` も実 `/system` lowerdir で動作確認済みで、GMS の `/system` overlay の前提が整いました。
