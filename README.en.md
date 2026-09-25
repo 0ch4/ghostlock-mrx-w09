@@ -277,4 +277,4 @@ $ ps -A -o PID,UID,NAME | grep ghostlock
 
 Security research on a device owned by the author, for interoperability and repair purposes.
 CVE-2026-43499 is public and many PoCs already exist. Do not use this against devices you do not
-own. Provided as-is, no warranty.
+own. Provided as-is, no warranty. See [docs/PUBLICATION_REVIEW_ja.md](docs/PUBLICATION_REVIEW_ja.md) for the formal legal notice and disclaimer.
