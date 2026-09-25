@@ -1,0 +1,24 @@
+NOTICE
+======
+
+1. Exploit code (exploit/, enabler/)
+   The code in this repository is the author's own work, written from scratch for a
+   device the author owns, with reference to the public PoC corpus for
+   CVE-2026-43499 (which was publicly disclosed on 2026-07-07 together with a
+   full-chain PoC).  It is provided under the MIT license (see LICENSE).
+
+2. Kernel source excerpts (docs/)
+   The HKIP analysis in docs/ quotes short excerpts of the Huawei/Linux kernel
+   source (drivers/hisi/hhee/hkip/*, include/linux/hisi/hisi_hkip.h, kernel/*),
+   which is licensed under the GNU General Public License version 2.  Those
+   excerpts remain under GPLv2 and are attributed to their respective authors
+   (Huawei Technologies Co., Ltd. and the Linux kernel community).  The excerpts
+   are included for identification and analysis purposes only.
+
+3. Firmware-derived data (docs/SYMBOLS_20260926.md)
+   Symbol names and addresses were extracted from a firmware image for research
+   and interoperability purposes.  No firmware binary is redistributed here.
+
+4. Trademarks
+   Huawei, Kirin, EMUI and related marks are trademarks of their respective
+   owners.  This project is not affiliated with or endorsed by them.
