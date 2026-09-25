@@ -1,0 +1,103 @@
+root: enter
+root: consumer tid=10618
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+root: priming done
+freeze: access[base-kernel] raw='217f7d ffffffff 200 ffffffff 1 0' nf=6 allowed=217f7d flags=0
+freeze: access[base-shell] raw='2217ffd ffffffff 0 ffffffff 1 0' nf=6 allowed=2217ffd flags=0
+root: BASELINE access kernel=0 shell=0
+root: park W=ffffffd2b2963cf0 base=ffffffd2b2963c78 node=ffffffd2b2963d40
+root: parked=1 g_s6 reset
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+freeze: PROBE node+00 addr=ffffffd2b2963d40 w=0 rok=1 q0=ffffffd2b2963d41 q1=ffffff927ee9cfe8
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+freeze: PROBE node+38 addr=ffffffd2b2963d78 w=0 rok=1 q0=ffffffff0000030b q1=ffffff927ee9cfe8
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+root: PERM_HIGH w=0 val_low32=d886bd30
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+root: PERM_NODE w=0
+freeze: access[post-kernel] raw='217f7d ffffffff 200 ffffffff 1 0' nf=6 allowed=217f7d flags=0
+freeze: access[post-shell] raw='2217ffd ffffffff 0 ffffffff 1 1' nf=6 allowed=2217ffd flags=1
+root: ACCESS-ORACLE kernel=0 shell=1 (bit0=PERMISSIVE)
+root: ORACLE attr/exec att=0 write=12 e=0
+root: *** shell type PERMISSIVE (attr/exec) ***
+root: capval i=0 W=ffffffd268293cf0 node=ffffffd268293d40 low32=68293d40 [BIT21]
+root: cap value=ffffffd268293d40 low32=68293d40
+root: forked child pid=10818
+root: child start
+capmode ip=ffffff927bf8e9e8 n=16 chg=5 x0=ffffff927dcc0660  (ns=1820 nin=57 any=ffffff927e85f8c0 x19=ffffffd2adb05640 x19chg=1)
+root: child leaked C=ffffffd2afd37a80
+root: MAIN C=ffffffd2afd37a80
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+root: pid0 shield X=ffffffd2adb05640 (w=0)
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+root: leafzero uid/gid (w=0) C=ffffffd2afd37a80
+root: child flag w=316 f=1 n=1
+root: MAIN C2=ffffffd14e1c4d80
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+arm: r+
+arm: r-
+arm: w+
+arm: w-
+arm: j+
+arm: j-
+root: cap inject eff=0 perm=0 (value=ffffffd268293d40) -> child mounts
+root: MAIN done, child will mount; parking
+root: setuid proof path=/data/local/tmp/glrt/glsh glsh_ok=1
+root: setuid proof child status=0
+root: SETUID OUTPUT (282 bytes):
+--- uid-2000 exec of 4755 glsh ---
+uid=0(root) gid=2000(shell) euid=0(root) groups=2000(shell),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc),3011(uhid) context=u:r:shell:s0
+0
+u:r:shell:s0

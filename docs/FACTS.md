@@ -4821,3 +4821,132 @@ the kernel reboot dropped the /system overlays (grep -c ' /system/priv-app ' /pr
 perf_event_paranoid went back to 3 (injection gone) and root is gone. The /data/app updates
 persist but are no longer backed by a /system/priv-app base, so they are NOT privileged system
 apps any more. To restore native GMS, re-run the (153) runbook on a fresh boot.
+
+### (154) 2026-09-26 AGENT: ROOT + NATIVE GMS RESTORED FROM A PERSISTENT /data STAGING (Play Store
+### launches, renders AND navigates); the /data/gms blocker; the allowlist fix; regms.sh recorded
+
+Task: re-root after the watchdog reboot, move the GMS staging OFF tmpfs to persistent /data, re-apply
+the systemize, verify PRIVILEGED + Play Store launch/render/navigate, fix the WRITE_DEVICE_CONFIG
+allowlist, write regms.sh.  Device stopped on owner request after step (e).
+
+BINARY: no source change was needed; the on-device /data/local/tmp/ghostlock_e is already the (153)
+GLMOUNT build:
+  sha256 b44713e6fbcd7505d2e12cc41289e8facb2d4b391c7545aa1d90a7c4610378ea
+  (ghostlock_mrx_e.c unchanged; --simple/--cede/--full/--freeze/--root untouched)
+
+=== 1) RE-ROOT (enabler runbook) - VERIFIED ===
+  cd /data/local/tmp
+  ./inject_hook place 0x84000 0x244 0x7a3d8   -> [+] SHELLCODE PLACED @0x84000
+  ./inject_hook hook  0x7a3d4 0x84000         -> [+] HOOKED 0x7a3d4 -> 0x84000 (b=0x1400270b)
+  nohup /system/bin/bugreportz &  (poll)       -> perf_event_paranoid 3 -> -1
+  ./inject_hook restore 0x7a3d4 0xd10403ff    -> [+] RESTORED 0x7a3d4 = 0xd10403ff
+  then: nohup /data/local/tmp/ghostlock_e --root > /data/local/tmp/gl.out 2>&1 &
+  gl.klog: freeze: access[post-shell] raw='2217ffd ffffffff 0 ffffffff 1 1' ... flags=1
+           root: cap inject eff=0 perm=0 (value=ffffffd268293d40) -> child mounts
+           root: MAIN done, child will mount; parking
+           root: setuid proof path=/data/local/tmp/glrt/glsh glsh_ok=1
+                 uid-2000 exec of 4755 glsh -> uid=0(root) euid=0(root) context=u:r:shell:s0
+  /data/local/tmp/su -c id    -> uid=0(root) gid=0(root) context=u:r:shell:s0
+  /data/local/tmp/su -c GLCAP -> uid=0 CapEff=ffffffd268293d40 prm=... bnd=0000000000000000
+  NOTE: rsh (a mksh copy) drops euid without -p, so `rsh -c id` shows uid=2000; `su -c id` is the
+  correct root probe.  The injected CapEff carries CAP_SYS_ADMIN (bit21) but NOT CAP_KILL/CAP_DAC_OVERRIDE.
+
+=== 2) PERSISTENT STAGING: /data/gms is IMPOSSIBLE with the injected caps - EACCES ===
+  /data is drwxrwx--x system system.  Our process is uid 0 but the creds have NO CAP_DAC_OVERRIDE
+  (exec recomputes caps), so uid 0 falls in "others" (x only):
+    /data/local/tmp/su -c "mkdir -p /data/gms" -> mkdir: '/data/gms': Permission denied (EACCES)
+    /data/local/tmp/su -c "touch /data/gms_probe" -> touch: ... Permission denied (EACCES)
+  The SAME rule blocks listing /data/app (drwxrwx--x system system): `ls -la /data/app` -> EACCES,
+  so the "copy the APKs out of /data/app" route is also closed to this cred.  (To lift it, the
+  --root cap search would have to also require CAP_DAC_OVERRIDE (bit1) -> edit+rebuild; deferred.)
+  => The persistent staging lives at /data/local/tmp/gms_stage.  It is on the /data block device
+  (/dev/block/sdd74, 109G, NOT a tmpfs: the tmpfs that vanished was /data/local/tmp/glrt) and it
+  SURVIVED the reboot: mtimes 04:24-04:27 from the (153) session, still present at 05:13.
+  Contents (the exact Google-signed MindTheGapps APKs systemized in (153), plus the complete XMLs):
+    priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk            104901895  (com.google.android.gms 19.2.75)
+    priv-app/GoogleServicesFramework/GoogleServicesFramework.apk 3923176 (com.google.android.gsf 10)
+    priv-app/Phonesky/Phonesky.apk                          32857746   (com.android.vending 15.2.67)
+    permissions/{privapp-permissions-google,-p,-ps}.xml, com.google.android.maps.xml,
+                com.google.android.dialer.support.xml
+    sysconfig/{google.xml,google_build.xml,google-hiddenapi-package-whitelist.xml}
+
+=== 3) ALLOWLIST FIX: WRITE_DEVICE_CONFIG for com.google.android.gms - APPLIED (sticky-grant caveat) ===
+  aapt2 dump permissions PrebuiltGmsCore.apk -> uses-permission android.permission.WRITE_DEVICE_CONFIG
+  but the gms block of privapp-permissions-google-ps.xml did NOT list it (the single occurrence was
+  under com.google.android.settings.intelligence, line 278) => with ro.control_privapp_permissions=
+  enforce, a privileged gms requesting it is the reported crash path.
+  FIX: inserted <permission name="android.permission.WRITE_DEVICE_CONFIG"/> right after the
+  <privapp-permissions package="com.google.android.gms"> open tag.  New file sha256
+  80649c13e35614d2cdfaf2af45618e11ab6fa9e57f196913d028be679f7c019d (19166 bytes), pushed over the
+  persistent copy at /data/local/tmp/gms_stage/permissions/privapp-permissions-google-ps.xml and
+  picked up by the merged /system/etc/permissions overlay (grep -c WRITE_DEVICE_CONFIG = 2).
+  CAVEAT (honest): the RUNNING gms is the /data/app UPDATE 26.34.36 installed during (153b) under
+  the OLD allowlist; its install-permission state is sticky, so `dumpsys package com.google.android.gms`
+  lists WRITE_DEVICE_CONFIG under "requested permissions" but NOT under "install permissions"
+  (only READ_DEVICE_CONFIG shows granted=true).  Re-granting would need the update to be reinstalled/
+  cleared (next session).  It does not matter empirically: no PlatformConfigurator/WRITE_DEVICE_CONFIG
+  SecurityException appears anywhere (crash buffer grep = 0), GMS is stable, and the Play Store works
+  (the self-update path repaired the earlier navigation/download symptom, per the owner).
+
+=== 4) SYSTEMIZE FROM THE PERSISTENT STAGING - VERIFIED ===
+  /data/local/tmp/su -c "sh /data/local/tmp/gms_setup.sh"   (rm -rf + copy from gms_stage into
+     /data/local/tmp/glrt/gms/upper-{priv,perm,sys}, chown 0:0, chmod a+rX, chcon -R system_file)
+     -> e.g. -rw-rw-rw- root root u:object_r:system_file:s0 .../upper-priv/PrebuiltGmsCore/PrebuiltGmsCore.apk
+  GLMOUNT via su_server (the only process holding CAP_SYS_ADMIN):
+     GLMOUNT|overlay|/system/priv-app|overlay|0|lowerdir=/system/priv-app,upperdir=.../upper-priv,workdir=.../work-priv        -> rc=0 errno=0
+     GLMOUNT|overlay|/system/etc/permissions|overlay|0|lowerdir=/system/etc/permissions,upperdir=.../upper-perm,workdir=.../work-perm -> rc=0 errno=0
+     GLMOUNT|overlay|/system/etc/sysconfig|overlay|0|lowerdir=/system/etc/sysconfig,upperdir=.../upper-sys,workdir=.../work-sys   -> rc=0 errno=0
+  merged /system/priv-app now has GoogleServicesFramework, Phonesky, PrebuiltGmsCore.
+  FRAMEWORK RESTART: `su -c "setprop ctl.restart zygote"` (kill -9 system_server = EPERM, no CAP_KILL)
+     BEFORE system_server=1675 zygote=642 uptime=942
+     AFTER  system_server=13702 zygote=13619 uptime=995   (soft reboot; overlays survived:
+            grep -c ' /system/priv-app ' /proc/mounts = 1)
+
+=== 5) VERIFICATION (plain adb shell) - PRIVILEGED OK, PLAY OK ===
+  pm path: com.google.android.gms -> /data/app/.../base.apk (+ splits ja,xxhdpi)  [updated]
+           com.google.android.gsf -> /system/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk
+           com.android.vending    -> /data/app/.../base.apk (+ splits)             [updated]
+  dumpsys package:
+    com.google.android.gms  26.34.36  codePath=/data/app/... flags=[SYSTEM ... UPDATED_SYSTEM_APP ...]
+                             privateFlags=[... PRIVILEGED]
+    com.google.android.gsf  10        codePath=/system/priv-app/GoogleServicesFramework
+                             flags=[SYSTEM ...] privateFlags=[... PRIVILEGED]
+    com.android.vending     53.2.23   codePath=/data/app/... flags=[SYSTEM ... UPDATED_SYSTEM_APP ...]
+                             privateFlags=[... PRIVILEGED]
+    => all three PRIVILEGED.  gms/vending report /data/app codePath only because the (153b) Store
+       self-update is installed on top of the /system/priv-app base; they keep the privileged flag
+       (exactly the (153b) baseline).  gsf has no update so shows /system/priv-app.
+  Play Store launch: am start -W -n com.android.vending/com.android.vending.AssetBrowserActivity
+     Starting: Intent { cmp=com.android.vending/.AssetBrowserActivity }
+     Status: ok
+     Activity: com.google.android.finsky.activities.MainActivity
+     mResumedActivity = com.android.vending/.AssetBrowserActivity
+  User state RUNNING_UNLOCKED; a com.google account is signed in (dumpsys account: type=com.google).
+  SCREENCAPS: evidence_regms/playstore_home_restore.png  (Play home/search, live recs: Firefox,
+     ChatGPT, TikTok, ... avatar "344")
+              evidence_regms/playstore_detail_navigate.png (market://details?id=com.google.android.apps.maps
+     opened IN the Store: "Google ??? - ???????", 4.3*, 66? reviews, 100?+ downloads,
+     an "??????" button, and a recommendations rail) => NAVIGATION WORKS.
+  Crash buffer after the restart+launch: only com.google.android.youtube (4x, crash-looping - it is a
+     /data/app app from (153b)); NO gms, NO vending, NO PlatformConfigurator, NO ClassCastException
+     (grep -c ClassCastException = 0).
+  NOT COMPLETED: an actual UI download.  `uiautomator dump` failed with "could not get idle state"
+     (the Store UI never idles), so no reliable Install tap; the owner called STOP here.  Downloads
+     are indirectly supported (account signed in, INSTALL_PACKAGES granted, (153b) YouTube install),
+     but this run did not press Install.
+
+=== 6) FINAL DEVICE STATE (at STOP) ===
+  perf_event_paranoid = -1 (injection live); uptime 1244 s; system_server=13702 zygote=13619
+  overlays mounted (3x, /proc/mounts above); root via /data/local/tmp/su (uid 0)
+  exploit processes: ghostlock_e pid 10253 (MAIN, parked in SyS_rt_sigsuspend) + root child 10818
+     => MAIN IS PARKED (expected for --root; one parked MAIN while --root is live)
+  staging /data/local/tmp/gms_stage present (persistent); /data/gms absent (EACCES, see 2)
+  Device left in a safe state: no run in flight, no reboot, framework up, Play Store frontmost.
+
+=== 7) DELIVERABLES SAVED ===
+  evidence_regms/ (state, mounts, pm_path, dumpsys_privileged, crash buffer+histogram, gl.klog,
+     gl.out, staging, both screencaps)
+  regms.sh  (one-command restore, steps 1-5) + gms_setup.sh + gms_restart.sh (now uses
+     setprop ctl.restart zygote instead of kill -9).
+  Task 2 (auto-restore probes: /preas, untrusted_app_27 exec, inject_hook requirements, domain
+     dependency) was NOT started, per the STOP request.

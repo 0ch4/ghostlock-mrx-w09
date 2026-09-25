@@ -1,0 +1,9 @@
+paranoid=-1
+uptime=1268
+system_server=13702 zygote=13619
+--- exploit procs ---
+shell        10253     1   82708    484 SyS_rt_sigsuspend   0 S ghostlock_e
+root         10818 10253   82708    740 0                   0 S ghostlock_e
+--- root id ---
+uid=0(root) gid=0(root) groups=0(root),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc),3011(uhid) context=u:r:shell:s0
+uid=0 euid=0 CapEff=ffffffd268293d40 prm=ffffffd268293d40 bnd=0000000000000000

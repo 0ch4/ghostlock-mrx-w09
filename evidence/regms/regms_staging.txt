@@ -1,0 +1,35 @@
+/data/local/tmp/gms_stage:
+total 15
+drwxrwxrwx 5 shell shell 3488 2026-09-26 04:26 .
+drwxrwx--x 6 shell shell 3488 2026-09-26 05:18 ..
+drwxrwxrwx 2 shell shell 3488 2026-09-26 05:13 permissions
+drwxrwxrwx 5 shell shell 3488 2026-09-26 04:26 priv-app
+drwxrwxrwx 2 shell shell 3488 2026-09-26 04:27 sysconfig
+
+/data/local/tmp/gms_stage/permissions:
+total 62
+drwxrwxrwx 2 shell shell  3488 2026-09-26 05:13 .
+drwxrwxrwx 5 shell shell  3488 2026-09-26 04:26 ..
+-rw-rw-rw- 1 shell shell   564 2026-09-26 04:24 com.google.android.dialer.support.xml
+-rw-rw-rw- 1 shell shell   813 2026-09-26 04:24 com.google.android.maps.xml
+-rw-rw-rw- 1 shell shell 16810 2026-09-26 04:24 privapp-permissions-google-p.xml
+-rw-rw-rw- 1 shell shell 19166 2026-09-26 05:10 privapp-permissions-google-ps.xml
+-rw-rw-rw- 1 shell shell  4291 2026-09-26 04:24 privapp-permissions-google.xml
+
+/data/local/tmp/gms_stage/sysconfig:
+total 26
+drwxrwxrwx 2 shell shell 3488 2026-09-26 04:27 .
+drwxrwxrwx 5 shell shell 3488 2026-09-26 04:26 ..
+-rw-rw-rw- 1 shell shell 7652 2026-09-26 04:24 google-hiddenapi-package-whitelist.xml
+-rw-rw-rw- 1 shell shell 6085 2026-09-26 04:24 google.xml
+-rw-rw-rw- 1 shell shell 1106 2026-09-26 04:24 google_build.xml
+=== fixed xml block ===
+
+
+    <privapp-permissions package="com.google.android.gms">
+
+        <permission name="android.permission.WRITE_DEVICE_CONFIG"/>
+
+        <permission name="android.permission.ACCESS_NETWORK_CONDITIONS"/>
+
+80649c13e35614d2cdfaf2af45618e11ab6fa9e57f196913d028be679f7c019d  /data/local/tmp/gms_stage/permissions/privapp-permissions-google-ps.xml

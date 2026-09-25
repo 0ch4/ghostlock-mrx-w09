@@ -1,0 +1,23 @@
+[*] _stext=ffffff927be81000 slide=0000001273e00000 task=ffffffd1db0ad640 stamp_off=0xa0
+[*] &pi1=0x4cf150 &pi2=0x4cf154 &cond=0x4cf158 &y_tid=0x4cf15c
+[y] arm waiter_abs=0xffffffd2b2963cf0
+[y] arm waiter_abs=0xffffffd2b2963cf0
+[y] arm waiter_abs=0xffffffd2b2963cf0
+freeze: access[base-kernel] raw='217f7d ffffffff 200 ffffffff 1 0' nf=6 allowed=217f7d flags=0
+freeze: access[base-shell] raw='2217ffd ffffffff 0 ffffffff 1 0' nf=6 allowed=2217ffd flags=0
+[y] arm waiter_abs=0xffffffd2b2963cf0
+[y] freeze prepare: nfds=64 (blocking pselect6 parked after the MCAST copy)
+[y] arm waiter_abs=0xffffffd2d886bcf0
+freeze: PROBE node+00 addr=ffffffd2b2963d40 w=0 rok=1 q0=ffffffd2b2963d41 q1=ffffff927ee9cfe8
+[y] arm waiter_abs=0xffffffd2d886bcf0
+freeze: PROBE node+38 addr=ffffffd2b2963d78 w=0 rok=1 q0=ffffffff0000030b q1=ffffff927ee9cfe8
+[y] arm waiter_abs=0xffffffd2d886bcf0
+[y] arm waiter_abs=0xffffffd2afd8fcf0
+freeze: access[post-kernel] raw='217f7d ffffffff 200 ffffffff 1 0' nf=6 allowed=217f7d flags=0
+freeze: access[post-shell] raw='2217ffd ffffffff 0 ffffffff 1 1' nf=6 allowed=2217ffd flags=1
+[y] arm waiter_abs=0xffffffd268293cf0
+[y] freeze prepare: nfds=64 (blocking pselect6 parked after the MCAST copy)
+[y] arm waiter_abs=0xffffffd14b32bcf0
+[y] arm waiter_abs=0xffffffd14fe6fcf0
+[y] arm waiter_abs=0xffffffd14b32bcf0
+[y] arm waiter_abs=0xffffffd14b32bcf0

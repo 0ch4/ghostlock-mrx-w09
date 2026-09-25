@@ -1,0 +1,7 @@
+package:/data/app/com.google.android.gms-bFRLS3EOLQaAIoA0L5w13Q==/base.apk
+package:/data/app/com.google.android.gms-bFRLS3EOLQaAIoA0L5w13Q==/split_config.ja.apk
+package:/data/app/com.google.android.gms-bFRLS3EOLQaAIoA0L5w13Q==/split_config.xxhdpi.apk
+package:/system/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk
+package:/data/app/com.android.vending-Dyrj_P8RT96NS4iNS1uwBw==/base.apk
+package:/data/app/com.android.vending-Dyrj_P8RT96NS4iNS1uwBw==/split_config.arm64_v8a.apk
+package:/data/app/com.android.vending-Dyrj_P8RT96NS4iNS1uwBw==/split_config.ja.apk

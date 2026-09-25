@@ -1,0 +1,24 @@
+===== com.google.android.gms =====
+    versionName=26.34.36 (100400-981326859)
+    codePath=/data/app/com.google.android.gms-bFRLS3EOLQaAIoA0L5w13Q==
+    flags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA UPDATED_SYSTEM_APP ALLOW_BACKUP RESTORE_ANY_VERSION ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE HAS_DOMAIN_URLS PARTIALLY_DIRECT_BOOT_AWARE PRIVILEGED ]
+===== com.google.android.gsf =====
+    versionName=10
+    codePath=/system/priv-app/GoogleServicesFramework
+    flags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVILEGED ]
+===== com.android.vending =====
+    versionName=53.2.23-29 [0] [PR] 980945147
+    codePath=/data/app/com.android.vending-Dyrj_P8RT96NS4iNS1uwBw==
+    flags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA UPDATED_SYSTEM_APP ALLOW_BACKUP RESTORE_ANY_VERSION ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE HAS_DOMAIN_URLS PARTIALLY_DIRECT_BOOT_AWARE PRIVILEGED ]
+=== gms INSTALL/privileged perms ===
+      android.permission.READ_DEVICE_CONFIG
+      android.permission.WRITE_DEVICE_CONFIG
+      android.permission.EMERGENCY_INSTALL_PACKAGES
+      android.permission.READ_DEVICE_CONFIG: granted=true
+      android.permission.READ_DEVICE_CONFIG
+      android.permission.WRITE_DEVICE_CONFIG
+      android.permission.READ_DEVICE_CONFIG: granted=true
+      android.permission.READ_DEVICE_CONFIG: granted=true
