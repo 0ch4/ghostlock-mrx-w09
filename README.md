@@ -2,9 +2,15 @@
 
 **CVE-2026-43499（"GhostLock"）** の特定端末への移植と **エンドゲーム（root 取得）** の実機検証記録です。
 
-> **状態: root 取得成功・実機検証済み。**
-> `rsh -c id` → `uid=0(root) gid=0(root) … context=u:r:shell:s0`、
+> **状態: root 取得成功・実機検証済み／complete root 達成／ネイティブ GMS 稼働。**
+> `rsh -c id` / `su -c id` → `uid=0(root) gid=0(root) … context=u:r:shell:s0`、
 > root 所有の `/data/local/tmp/rooted.txt` と 4755 root 所有の `/data/local/tmp/rsh` を生成。
+> **complete root**: SELinux `shell` 型を in-memory で permissive 化（常駐 stamp window 経由）＋
+> **CAP_SYS_ADMIN** を注入し、**`mount(2)` で非 nosuid な tmpfs**（全プロセスから可視）を作成、
+> そこに **4755 root 所有シェル**を設置（uid-2000 のプロセスが exec すると `euid=0`）。
+> **ネイティブ GMS**: 本物の Google APK（MindTheGapps、`CN=Android, O=Google Inc.` 署名）を
+> **`/system/priv-app` に privileged system app として配置**（overlayfs ＋ `system_server` 再走査）し、
+> **本物の Play Store が動作**（アプリの実インストールと自己更新を実機で確認）。
 > 対象は **Huawei MRX-W09**（MatePad Pro 10.8, 2019）／**EMUI 11（Android 10 ベース）**／
 > **Linux 4.14.116（Kirin 990, arm64, LTO/CFI, Huawei HKIP 有効）**。
 

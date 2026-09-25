@@ -4,9 +4,16 @@ Japanese version (default): [README.md](README.md)
 
 Port and endgame for **CVE-2026-43499 ("GhostLock")**, verified end-to-end on a real device.
 
-> **Status: root achieved and verified.**
-> `rsh -c id` → `uid=0(root) gid=0(root) … context=u:r:shell:s0`, with a root-owned
+> **Status: root achieved and verified / complete root achieved / native GMS running.**
+> `rsh -c id` / `su -c id` → `uid=0(root) gid=0(root) … context=u:r:shell:s0`, with a root-owned
 > `/data/local/tmp/rooted.txt` and a 4755 root-owned `/data/local/tmp/rsh`.
+> **Complete root**: the SELinux `shell` type is made permissive in memory (via a resident stamp
+> window) and **CAP_SYS_ADMIN** is injected, so a **direct `mount(2)`** creates a **non-nosuid tmpfs**
+> visible to every process, on which a **4755 root-owned shell** is installed (a uid-2000 process
+> executing it gets `euid=0`).
+> **Native GMS**: the real Google APKs (MindTheGapps, signed `CN=Android, O=Google Inc.`) are placed in
+> **`/system/priv-app` as privileged system apps** (overlayfs + a `system_server` rescan), and the
+> **real Play Store works** (apps really install; it self-updates).
 > The device is a **Huawei MRX-W09** (MatePad Pro 10.8, 2019) on **EMUI 11 / Android 10-based /
 > Linux 4.14.116 (Kirin 990, arm64, LTO/CFI, Huawei HKIP enabled)**.
 
