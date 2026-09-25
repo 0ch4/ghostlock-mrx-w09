@@ -4800,3 +4800,24 @@ REPRODUCIBLE RUNBOOK (one boot; unlock the tablet first so the Store can resolve
   /data/local/tmp/su -c "setprop ctl.restart zygote"                      # SOFT framework restart, ~30s
   pm path / dumpsys package  -> /system/priv-app + SYSTEM + PRIVILEGED
   am start -n com.android.vending/com.android.vending.AssetBrowserActivity # opens the Store
+
+
+### (153b) 2026-09-26 AGENT: ADDENDUM - the systemized Play Store really INSTALLED/UPDATED apps from Google's servers (and the known watchdog reboot)
+
+Recorded from dumpsys while the (153) session was live (before the device rebooted):
+  com.android.vending   15.2.67-all -> 53.2.23-29 [0] [PR] 980945147   lastUpdateTime 04:52:37
+  com.google.android.gms 19.2.75    -> 26.34.36 (100400-981326859)      lastUpdateTime 04:53:00
+        privateFlags still [... PRIVILEGED] - a /data/app update of a priv-app keeps the flag
+  com.google.android.youtube 21.38.130                                  firstInstallTime 04:54:05
+        YouTube was NOT preinstalled on this China/Huawei image; its installerPackageName is
+        com.android.vending, i.e. the Play Store downloaded and installed it from Google's servers.
+All three have installerPackageName=com.android.vending.
+=> the Play Store's search/install/update path is LIVE, not merely a rendered UI. This is a
+stronger result than the (153) "opens" milestone.
+
+The device then rebooted on its own (userspace watchdog; loadavg ~35 with 1-2 runnable tasks -
+the known post-exploit wedge documented since FACTS 9t). That is the known 1-boot-only limit:
+the kernel reboot dropped the /system overlays (grep -c ' /system/priv-app ' /proc/mounts = 0),
+perf_event_paranoid went back to 3 (injection gone) and root is gone. The /data/app updates
+persist but are no longer backed by a /system/priv-app base, so they are NOT privileged system
+apps any more. To restore native GMS, re-run the (153) runbook on a fresh boot.
