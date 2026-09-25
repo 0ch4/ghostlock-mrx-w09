@@ -4626,3 +4626,177 @@ NEXT HYPOTHESES
      google dirs, then restart system_server so PackageManager rescans /system.
   2. If a real setns is ever needed (private shell ns), select a cap node with bit21 AND bit18
      (CAP_SYS_ADMIN|CAP_SYS_CHROOT) - or extend root_cap_value() to require both.
+
+
+### (153) 2026-09-26 AGENT: NATIVE GMS SYSTEMIZED VIA OVERLAYFS - REAL Google Play Store / GMS / GSF ARE PRIVILEGED SYSTEM APPS AND THE PLAY STORE OPENS (N1+N2 of ghostlock_pocs/GMS_PLAN_20260926.md)
+
+Task: N1 (obtain Google's official APKs: com.google.android.gms, com.google.android.gsf,
+com.android.vending) + N2 (make them privileged system apps via an overlayfs over
+/system/priv-app and /system/etc/permissions, then restart system_server so PackageManager
+rescans /system), then verify from a plain adb shell and launch the Play Store.
+Result: N1 + N2 COMPLETE; the real Google Play Store OPENS and renders live store content
+(screencaps). Google-account sign-in was NOT tested (next milestone, needs an account).
+
+DEVICE: Huawei MRX-W09 (Kirin 990, Android 10 / EMUI 11.0.0.235). The framework restart was
+a SOFT reboot (kernel uptime kept counting); the overlays survived because they live in the
+kernel mount table, not in system_server.
+
+================================================================================
+N1 - REAL (Google-signed) APKs
+================================================================================
+The %TEMP%\gms\*-hw.apk pair that the task hinted at is NOT Google:
+  apksigner Signer #1 DN = O=NOGAPPS Project, C=DE  (labels "microG Services" / "microG Companion")
+so both were rejected. Real APKs were taken from the publicly redistributed google-signed
+MindTheGapps 10.0.0-arm64 bundle (MindTheGapps-10.0.0-arm64-20230922_081111.zip), which
+packages Google's factory-image APKs. apksigner verified every signer:
+  PrebuiltGmsCore.apk          com.google.android.gms  19.2.75 (120400-269183835)   targetSdk 29
+  GoogleServicesFramework.apk  com.google.android.gsf  10  (versionCode 29)          targetSdk 29
+  Phonesky.apk                 com.android.vending     15.2.67-all [0] [PR] 256058878 targetSdk 28
+  all three: Signer #1 DN = CN=Android, OU=Android, O=Google Inc., L=Mountain View,
+             ST=California, C=US
+             Signer #1 SHA-256 = f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83
+Aurora's dispenser (https://auroraoss.com/api/auth/ , note the trailing slash: without it
+Cloudflare returns 403) IS reachable and a GET returned an account
+{email:"auroranovalights@gmail.com", auth:"ya29...."} (an OAuth token); gpapi is installed on
+the host but has no anonymous download path and the dispenser account has no password, so the
+direct host-side Play download was not pursued. It was unnecessary because the GApps APKs are
+already real and Google-signed. (microG remains the previously-confirmed fallback; this run is
+the REAL Google stack.)
+MindTheGapps also supplies the matching whitelists (installed into the permissions overlay):
+  privapp-permissions-google.xml, privapp-permissions-google-p.xml,
+  privapp-permissions-google-ps.xml  (the -ps file covers com.google.android.gms,
+  com.google.android.gsf and com.android.vending), com.google.android.maps.xml,
+  com.google.android.dialer.support.xml, and sysconfig/google.xml, google_build.xml,
+  google-hiddenapi-package-whitelist.xml.
+NOTE: ro.control_privapp_permissions=enforce on this build, so a missing whitelist entry would
+have killed system_server while scanning; the GApps XMLs are written for exactly these packages
+and loaded cleanly (system_server came up normally).
+
+================================================================================
+N2 - overlayfs systemize + framework rescan
+================================================================================
+Enabler runbook (as in FACTS 152), then the new binary:
+  inject_hook place 0x84000 0x244 0x7a3d8 ; inject_hook hook 0x7a3d4 0x84000 ;
+  nohup /system/bin/bugreportz & sleep 25 ; inject_hook restore 0x7a3d4 0xd10403ff
+  -> perf_event_paranoid=-1   (all four lines observed)
+  nohup /data/local/tmp/ghostlock_e --root > /data/local/tmp/gl.out 2>&1 &
+--root completed: freeze/park permissive shell (access[post-shell] flags=1), cap value
+  ffffffd8b03b3d40 (low32 carries bit21 = CAP_SYS_ADMIN), pid-0 shielded uid-0 child,
+  4755 glsh created, child entered su_server.
+Driver: a NEW in-process broker added to su_server (see CODE CHANGE) is used for the mounts,
+because su_server is the only place that HOLDS the injected CAP_SYS_ADMIN: glsh (the setuid
+shell) has CapEff=0000000000000000 / CapBnd=00000000000000c0 - an exec recomputes caps against
+the bounding set and loses CAP_SYS_ADMIN, so it cannot mount.
+
+Staging (root, /data/local/tmp/gms_setup.sh): copy the three APKs and the XMLs into the
+--root tmpfs upper dirs /data/local/tmp/glrt/gms/{upper-priv,upper-perm,upper-sys}, chown 0:0,
+chmod a+rX, then relabel EVERYTHING `chcon -R u:object_r:system_file:s0` (the shell type is
+permissive, so the relabel is allowed). Overlay upper/work MUST be on tmpfs: a /data
+(f2fs+fscrypt) upper returns EINVAL; tmpfs works and FACTS 152 proved the mounts are GLOBAL
+(init ns + system_server slave ns). Verified labels:
+  drwxrwxrwx root root u:object_r:system_file:s0  .../glrt/gms/upper-priv
+  -rw-rw-rw- root root u:object_r:system_file:s0  .../upper-priv/PrebuiltGmsCore/PrebuiltGmsCore.apk
+Mounts (via the broker; each returned rc=0 errno=0):
+  overlay /system/priv-app        lowerdir=/system/priv-app        upperdir=.../upper-priv workdir=.../work-priv
+  overlay /system/etc/permissions lowerdir=/system/etc/permissions upperdir=.../upper-perm workdir=.../work-perm
+  overlay /system/etc/sysconfig   lowerdir=/system/etc/sysconfig   upperdir=.../upper-sys  workdir=.../work-sys
+Merged entry counts: /system/priv-app 83 -> 86; /system/etc/permissions 70 -> 75;
+/system/etc/sysconfig 2 -> 5. (/system/etc/permissions had no pre-existing google/privapp file,
+so nothing was shadowed.)
+
+FRAMEWORK RESTART: `kill -9 $(pidof system_server)` FAILED with EPERM, because the injected
+CapEff (0xb03b3d40) has CAP_SYS_ADMIN but NOT CAP_KILL(5) and the uid/uid check fails
+(system_server euid=1000). Instead `setprop ctl.restart zygote` (handled by init; the property
+write is allowed by permissive shell) restarted zygote+system_server = SOFT reboot:
+system_server 1674 -> 6312, zygote64 640 -> 6228, kernel uptime kept counting (no reboot), and
+the overlays survived.
+
+================================================================================
+VERIFICATION (plain adb shell, uid 2000)
+================================================================================
+- /proc/mounts shows the three overlays after the restart.
+- the new system_server's own mountinfo carries them (master:50/51 -> slave propagation), so
+  PackageManager scanned the merged /system (before the restart PM knew nothing about GMS).
+- pm list packages: com.android.vending, com.google.android.gms, com.google.android.gsf
+- pm path:
+    package:/system/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk
+    package:/system/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk
+    package:/system/priv-app/Phonesky/Phonesky.apk
+    => SYSTEM apps (not /data/app).
+- dumpsys package:
+    com.google.android.gms   codePath=/system/priv-app/PrebuiltGmsCore          flags=[ SYSTEM ... ] privateFlags=[ ... PRIVILEGED ]
+    com.google.android.gsf   codePath=/system/priv-app/GoogleServicesFramework  flags=[ SYSTEM ... ] privateFlags=[ ... PRIVILEGED ] userId=10141 (shared uid)
+    com.android.vending      codePath=/system/priv-app/Phonesky                 flags=[ SYSTEM ... ] privateFlags=[ ... PRIVILEGED ] userId=10142
+    all install permissions granted (vending: INSTALL_PACKAGES, DELETE_PACKAGES, WRITE_SECURE_SETTINGS,
+    BACKUP, MANAGE_USERS, PACKAGE_VERIFICATION_AGENT, CHANGE_COMPONENT_ENABLED_STATE, ...).
+- GMS is LIVE: ps shows com.google.android.gms, com.google.android.gms.persistent,
+  com.google.android.gms.ui, com.google.android.gms.unstable (DroidGuard); logcat shows it in
+  u:r:priv_app:s0 doing its chimera module scan from
+  file:///system/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk.
+
+================================================================================
+PLAY STORE LAUNCH (the N2 milestone)
+================================================================================
+First attempts returned `Error type 3 ... does not exist` (-92 START_CLASS_NOT_FOUND) for both
+com.android.vending/com.android.vending.AssetBrowserActivity and
+com.google.android.finsky.activities.MainActivity, and monkey said "No activities found" -
+even when started as uid 0. ROOT CAUSE: `dumpsys user` showed User 0 State: RUNNING_LOCKED
+(the tablet was at its post-restart 6-digit-PIN lockscreen, screen 1600x2560). While the user is
+LOCKED, PackageManager/ActivityManager filter non-direct-boot-aware components, so a non-DBA app
+like Play Store is unreachable (that is why com.android.settings, directBootAware=true, still
+resolved). The package itself is correct: its manifest has AssetBrowserActivity
+enabled=true exported=true with MAIN/LAUNCHER.
+After the user became RUNNING_UNLOCKED (Unlock time +1m6s374ms), the launch succeeded:
+  am start -W -n com.android.vending/com.android.vending.AssetBrowserActivity
+    Starting: Intent { cmp=com.android.vending/.AssetBrowserActivity }
+    Status: ok
+    Activity: com.android.vending/com.google.android.finsky.activities.MainActivity
+    Complete
+  ps: com.android.vending (u0_a142) + com.android.vending:instant_app_installer + :recovery_mode
+  dumpsys activity: TaskRecord A=10142:com.android.vending, ActivityRecord
+    com.android.vending/.AssetBrowserActivity -> MainActivity.
+SCREENCAPS (real Google Play, no mock/stub):
+  playstore_launch.png - the Store search screen ("Google Play" search field, recent "youtube")
+  playstore_home.png   - the Store home screen: header "Google Play", tabs Games/Apps/Books and
+                         Recommended/Top charts/New/Premium/Categories/Family, "Recommended for you"
+                         with real app cards (Hitman Sniper JPY520->170, Tricky Castle,
+                         Mini Metro JPY130) and star ratings.
+=> The real Google Play Store OPENS and renders live store content on this Huawei device.
+NOT DONE / NEXT: Google-account sign-in (needs an account) then N3 certification (fingerprint
+spoof + GSF re-registration) and the N4 measurement matrix. Honest status: N1+N2 COMPLETE,
+Play Store opening VERIFIED, sign-in = next milestone.
+
+================================================================================
+CODE CHANGE (only ghostlock_mrx_e.c; --simple/--cede/--full/--freeze/--root stamp paths untouched)
+================================================================================
+Added a tiny IN-PROCESS broker to su_server (it only intercepts commands whose first two bytes
+are "GL"; everything else still execs /system/bin/sh):
+  GLMOUNT|src|tgt|fstype|flags_hex|data   ('-' => NULL pointer)  -> mount(2), replies rc/errno
+  GLUMOUNT|tgt|flags_hex                                          -> umount2(2)
+  GLCAP                                                           -> uid + CapEff/Prm/Bnd
+The su_server grandchild is forked from the pid-0 child, so it inherits the injected
+CAP_SYS_ADMIN; running mount(2) in-process is required because an exec cannot keep it.
+Build: <NDK r20b> aarch64-linux-android24-clang -O2 -static -pthread -o ghostlock_e_gms ghostlock_mrx_e.c
+  source sha256 A6A90E9539282B2B23418DF8F920940E7CFE73246EF61254258C1F8E18FFC45D
+  binary sha256 B44713E6FBCD7505D2E12CC41289E8FACB2D4B391C7545AA1D90A7C4610378EA
+  (device /data/local/tmp/ghostlock_e sha256 verified identical)
+Helper scripts (session_20260922): gms_setup.sh (staging + chcon), gms_restart.sh.
+Evidence files under %TEMP%\gms\evidence\: gl.out, gl.klog, gl.stage, mounts_final.txt,
+pm_list_final.txt, pm_path_final.txt, ps_google_final.txt, dumpsys_final_com.google.android.gms.txt,
+dumpsys_final_com.android.vending.txt, playstore_launch.png, playstore_home.png, lock_screen2.png,
+mounts_gms_before.txt, privapp_before.txt, permissions_before.txt.
+
+REPRODUCIBLE RUNBOOK (one boot; unlock the tablet first so the Store can resolve):
+  reboot ; unlock (dumpsys user must show RUNNING_UNLOCKED before launching the Store)
+  push shellcode.bin (798B, placeholder word 0x14000000 @0x244) | inject_hook | ghostlock_e (B44713E6)
+  inject_hook place 0x84000 0x244 0x7a3d8 ; inject_hook hook 0x7a3d4 0x84000 ;
+  nohup /system/bin/bugreportz & sleep 25 ; inject_hook restore 0x7a3d4 0xd10403ff
+  nohup /data/local/tmp/ghostlock_e --root > /data/local/tmp/gl.out 2>&1 &
+  /data/local/tmp/su -c "sh /data/local/tmp/gms_setup.sh"                 # stage APKs+XMLs, chcon system_file
+  /data/local/tmp/su -c "GLCAP"                                            # expect CapEff bit21
+  /data/local/tmp/su -c "GLMOUNT|overlay|/system/priv-app|overlay|0|lowerdir=/system/priv-app,upperdir=/data/local/tmp/glrt/gms/upper-priv,workdir=/data/local/tmp/glrt/gms/work-priv"
+  /data/local/tmp/su -c "GLMOUNT|overlay|/system/etc/permissions|overlay|0|lowerdir=/system/etc/permissions,upperdir=/data/local/tmp/glrt/gms/upper-perm,workdir=/data/local/tmp/glrt/gms/work-perm"
+  /data/local/tmp/su -c "GLMOUNT|overlay|/system/etc/sysconfig|overlay|0|lowerdir=/system/etc/sysconfig,upperdir=/data/local/tmp/glrt/gms/upper-sys,workdir=/data/local/tmp/glrt/gms/work-sys"
+  /data/local/tmp/su -c "setprop ctl.restart zygote"                      # SOFT framework restart, ~30s
+  pm path / dumpsys package  -> /system/priv-app + SYSTEM + PRIVILEGED
+  am start -n com.android.vending/com.android.vending.AssetBrowserActivity # opens the Store
