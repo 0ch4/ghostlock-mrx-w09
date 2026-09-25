@@ -1,0 +1,37 @@
+=== GLOBAL MOUNT EVIDENCE (run: --root, build 00a3e280) ===
+Sat Sep 26 04:09:35 JST 2026
+
+== A. plain adb shell /proc/mounts (glrt/glovl) ==
+tmpfs /data/local/tmp/glrt tmpfs rw,seclabel,relatime,gid=2000 0 0
+overlay /data/local/tmp/glrt/glovl/merged overlay rw,seclabel,relatime,lowerdir=/data/local/tmp/glrt/glovl/lower,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work 0 0
+overlay /data/local/tmp/glrt/glovl/sysview overlay rw,seclabel,relatime,lowerdir=/system/etc/permissions,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work 0 0
+
+== B. plain adb shell self mountinfo ==
+1896 99 0:44 / /data/local/tmp/glrt rw,relatime shared:47 - tmpfs tmpfs rw,seclabel,gid=2000
+1930 1896 0:45 / /data/local/tmp/glrt/glovl/merged rw,relatime shared:48 - overlay overlay rw,seclabel,lowerdir=/data/local/tmp/glrt/glovl/lower,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work
+2318 1896 0:46 / /data/local/tmp/glrt/glovl/sysview rw,relatime shared:49 - overlay overlay rw,seclabel,lowerdir=/system/etc/permissions,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work
+
+== C. init(1) mountinfo ==
+1896 99 0:44 / /data/local/tmp/glrt rw,relatime shared:47 - tmpfs tmpfs rw,seclabel,gid=2000
+1930 1896 0:45 / /data/local/tmp/glrt/glovl/merged rw,relatime shared:48 - overlay overlay rw,seclabel,lowerdir=/data/local/tmp/glrt/glovl/lower,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work
+2318 1896 0:46 / /data/local/tmp/glrt/glovl/sysview rw,relatime shared:49 - overlay overlay rw,seclabel,lowerdir=/system/etc/permissions,upperdir=/data/local/tmp/glrt/glovl/upper,workdir=/data/local/tmp/glrt/glovl/work
+
+== D. glsh -p -c id ==
+uid=0(root) gid=2000(shell) euid=0(root) groups=2000(shell),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc),3011(uhid) context=u:r:shell:s0
+
+== E. glsh -c id (mksh drops without -p) ==
+uid=2000(shell) gid=2000(shell) groups=2000(shell),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc),3011(uhid) context=u:r:shell:s0
+
+== F. overlay newdir contents ==
+LOWER-MARKER from tmpfs lowerdir
+UPPER-WRITE via overlay merged dir
+marker.txt
+upper_proof.txt
+
+== G. system-lowerdir overlay ==
+HiViewTunnel-core.xml
+android.hardware.bluetooth_le.xml
+android.hardware.faketouch.xml
+android.hardware.fingerprint.xml
+android.hardware.location.gps.xml
+count=71
