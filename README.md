@@ -271,3 +271,16 @@ $ ps -A -o PID,UID,NAME | grep ghostlock
 CVE-2026-43499 は公開済みで PoC も既に複数存在します。**他人が所有する端末に対して使用しないで
 ください。** 無保証・現状のまま提供します。法的立場および免責事項（正式な法的通知）は
 [docs/PUBLICATION_REVIEW_ja.md](docs/PUBLICATION_REVIEW_ja.md) を参照。
+
+## 11. 永続化
+
+この端末では**完全自動の再rootは存在しません**（静的調査: 起動時に書き込み可能領域から exec する
+アクターが無い／`shell_data_file` を exec できるのは `shell` ドメインだけ／setuid は `/data` が
+`nosuid` のため無効）。`/data` は永続するので、**再起動後は 1 コマンドで復活**できます:
+
+```sh
+adb shell /data/local/tmp/reroot.sh
+```
+
+詳細は [docs/static-analysis/TASK_PERSISTENCE_20260926.md](docs/static-analysis/TASK_PERSISTENCE_20260926.md)
+と [tools/reroot.sh](tools/reroot.sh) を参照。

@@ -278,3 +278,16 @@ $ ps -A -o PID,UID,NAME | grep ghostlock
 Security research on a device owned by the author, for interoperability and repair purposes.
 CVE-2026-43499 is public and many PoCs already exist. Do not use this against devices you do not
 own. Provided as-is, no warranty. See [docs/PUBLICATION_REVIEW_ja.md](docs/PUBLICATION_REVIEW_ja.md) for the formal legal notice and disclaimer.
+
+## 11. Persistence
+
+There is **no fully-autonomous re-root** on this device (static survey: no boot-time actor execs from
+a writable path; only the `shell` domain may exec `shell_data_file`; setuid is dead because `/data`
+is `nosuid`).  `/data` persists, so re-rooting after a reboot is one command:
+
+```sh
+adb shell /data/local/tmp/reroot.sh
+```
+
+See [docs/static-analysis/TASK_PERSISTENCE_20260926.md](docs/static-analysis/TASK_PERSISTENCE_20260926.md)
+and [tools/reroot.sh](tools/reroot.sh).
