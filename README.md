@@ -300,3 +300,13 @@ adb shell /data/local/tmp/reroot.sh
 **小さい整数値**（`ebitmap_node.startbit` など）は書けません。したがって任意バイトを置ける
 **resident stamp window**（`copy_from_user` 由来）が complete root の鍵になります。
 詳細と実測記録は `docs/FACTS.md`（9an(1)〜(150)）と `docs/static-analysis/*_20260926.md` を参照。
+### complete root（`--root`）の補足
+
+`--root` は `--freeze`（SELinux permissive）＋ CAP_SYS_ADMIN 注入 ＋ `--simple`（uid 0 / pid-0 シールド）を
+統合し、**その場で `mount(2)` を実行して非 nosuid な tmpfs を作り、4755 root 所有のシェルを置く**ところまで
+実機検証済みです（`mount` rc=0、`/mnt` は `nosuid`/`noexec` なし、uid-2000 のプロセスが 4755 シェルを
+exec すると euid=0）。
+
+ただし **mount は当該プロセスの mount namespace 内に限られ**、`adb shell` など別プロセスからは
+見えません（＝そこで setuid が効かない）。**`setns("/proc/1/ns/mnt")` してから mount** すれば
+全プロセスから利用可能になり、GMS の `/system` overlay にも必須です（次の課題）。
