@@ -1,0 +1,34 @@
+CHANGE 04 evidence — FAST, CLEAN native-GMS overlay (MRX-W09, 2026-09-26)
+=====================================================================
+Root cause of the "abnormal reset" + "no progress":
+  the bug-report's dumpstate collection saturated the system (loadavg up to 449) and
+  starved the exploit's timing-sensitive arms; the shell-domain `pkill dumpstate` FAILED
+  (SELinux denies shell->dumpstate BEFORE the permissive patch is applied).  The Huawei
+  watchdog then rebooted the box (boot.reason=reboot,abnormal, InitWatchdog: init d-state).
+
+Fix (this change):
+  1. stage 1 (uid 0, in dumpstate's OWN domain) does `pkill -9 dumpstate` right after writing
+     perf -> the report collection stops immediately (allowed: same domain).
+  2. the overlay mounts churn the AVC and retry (stale avc deny could return EACCES), and
+     mount /system/etc/permissions + /system/etc/sysconfig FIRST, /system/priv-app LAST,
+     all-or-nothing with umount rollback (never leave a partial overlay).
+  3. `ghostlock_e --root-gms` is the shield-free default.
+
+Observed (single clean cold boot):
+  ts_exploit_launched == ts_dumpstate_killed  (same second)
+  t+5s: perf=-1, overlay /system/priv-app mounted, loadavg 18.9  (NOT 449)
+  root: gms overlays try=0 base=/data/local/tmp/glrt priv=0 perm=0 sys=0 errno=0   <-- FIRST TRY
+  root: gms done (framework restarting)
+  +~60s: priv=1 perm=1 sys=1  ;  com.google.android.gms / .gsf / com.android.vending = PRIVILEGED x3
+  uptime continues (boot.reason=reboot,adb)  -> NO abnormal reset
+  loadavg ~31 (device baseline)
+
+Conclusion:
+  [D1] The native-GMS per-boot overlay can be applied FAST (~5 s to 3/3) and CLEANLY
+       (PRIVILEGED x3, no watchdog reset) once the bug-report collection is aborted early
+       and the mounts are AVC-retried / all-or-nothing.
+  [D2] The previously-seen "3-5 min / black launcher / abnormal reboot" was NOT inherent
+       to the overlay: it was the report-driven load + partial-overlay state.
+  [D3] Overlay upper MUST be tmpfs (/data upper = EINVAL).
+  [D4] To do: a 15-minute stability watch (no watchdog reboot), then re-run via the APK
+       oneshot + a11y (バグレポートを取得 -> 完全レポート -> 報告).

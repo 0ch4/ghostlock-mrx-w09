@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_desc">自動タップ: 「開発者向けオプション」が開いたときに「バグレポートを取得」を自動で押して、GhostLock の復元トリガを0タップにします（このサービスは設定画面の1項目を押すだけで、他は何もしません）。</string>
+</resources>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.ghostlock.manager"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="27" />
+
+    <!-- No permissions are required: /data/local/tmp and the app's own dirs need none. -->
+
+    <application
+        android:label="GhostLock Manager"
+        android:allowBackup="false"
+        android:debuggable="true">
+        <activity
+            android:name="com.ghostlock.manager.MainActivity"
+            android:exported="true"
+            android:label="GhostLock Manager">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="com.ghostlock.manager.AutoTapService"
+            android:exported="true"
+            android:label="GhostLock auto-tap"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/ghostlock_a11y" />
+        </service>
+
+        <receiver
+            android:name="com.ghostlock.manager.GhostAdminReceiver"
+            android:exported="true"
+            android:label="GhostLock Device Owner"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

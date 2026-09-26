@@ -1,0 +1,30 @@
+#!/system/bin/sh
+# N2 staging: populate the overlay upper dirs on the --root tmpfs with the
+# Google-signed priv-apps + permission/sysconfig XMLs, relabel them system_file.
+#
+# CHANGE 02: the tmpfs base is NOT deterministic (the root phase mounts its tmpfs on
+# the first of /data/local/tmp/glrt, /mnt, /dev, /data/local/tmp that accepts it, and
+# /data/local/tmp/glrt needs CAP_DAC_OVERRIDE which our cap value cannot carry).  So the
+# exploit now passes the ACTUAL base as $1 (default keeps the old path).
+set -x
+B="${1:-/data/local/tmp/glrt}/gms"
+S=/data/local/tmp/gms_stage
+rm -rf "$B"
+mkdir -p "$B/upper-priv/PrebuiltGmsCore" "$B/upper-priv/GoogleServicesFramework" "$B/upper-priv/Phonesky" \
+         "$B/work-priv" "$B/upper-perm" "$B/work-perm" "$B/upper-sys" "$B/work-sys"
+cp "$S/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk"           "$B/upper-priv/PrebuiltGmsCore/"
+cp "$S/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk" "$B/upper-priv/GoogleServicesFramework/"
+cp "$S/priv-app/Phonesky/Phonesky.apk"                         "$B/upper-priv/Phonesky/"
+cp "$S"/permissions/*.xml "$B/upper-perm/"
+cp "$S"/sysconfig/*.xml    "$B/upper-sys/"
+chown -R 0:0 "$B"
+chmod -R a+rX "$B"
+chcon -R u:object_r:system_file:s0 "$B"
+echo "=== upper-priv ==="
+ls -laZ "$B/upper-priv" "$B/upper-priv/"*
+echo "=== upper-perm ==="
+ls -laZ "$B/upper-perm"
+echo "=== upper-sys ==="
+ls -laZ "$B/upper-sys"
+sync
+echo DONE

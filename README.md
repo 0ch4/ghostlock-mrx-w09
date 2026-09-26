@@ -377,3 +377,13 @@ nohup /system/bin/bugreportz &
 - GMS 導入手引き（別リポジトリ）: https://github.com/0ch4/ghostlock-mrx-w09-gms
 - 前面アプリ（1 タップ復元）の設計: `ghostlock_app/DESIGN.md`（実測 / 要確認を明記）
 - 実測ログ: `binder_uaf/session_20260922/MRX_W09_GHOSTLOCK_FACTS.md`（9an(1)〜(168)）
+---
+
+## 14. 2026-09-26 更新（実機検証済み・作業セッションの反映）
+- **shield-free が既定**: `--root` / `--root-gms` は pid-0 シールド無し（旧シールドは `--root-old` / `--root-gms-old`）。合法 uid0 は
+  shell型permissive + `cap_effective`(CAP_SETUID) + `setresuid(0,0,1)` → `commit_creds` → `hkip_update_xid_root` が**実pidに HKIP bit** を設定（pid-0 の panic landmine を除去）。
+- **overlay は all-or-nothing**: `/system/etc/permissions`・`/system/etc/sysconfig` を先、`/system/priv-app` を**最後**に mount。失敗時は `umount2` でロールバックし**framework 再起動しない**（不完全 overlay は GMS/Play をクラッシュループさせランチャーを黒画面にする）。AVC の stale deny 対策にリトライ付き。
+- **root の tmpfs を `/dev`・`/mnt`・`/data/local/tmp` に被せない**（`/data/local/tmp/glrt*` の subdir のみ）。
+- **実測**: cold boot → arm → 1トリガ → **約5秒で overlay 3/3** → +30〜60秒で **PRIVILEGED ×3**。**pid-0 タスクは存在しない**。
+- **前面アプリ** `app/`: 「★復元(1操作)」＋AccessibilityService 自動タップ（バグレポートを取得→完全レポート→報告）で復元。
+- 注意: overlay は 1ブート限り。常用は microG+Aurora+ReVanced 推奨。詳細・証拠: `docs/session_20260926/`（STATUS/CHANGE01-06）。
