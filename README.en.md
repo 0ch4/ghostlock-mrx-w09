@@ -370,6 +370,19 @@ One trigger starts **two** processes and the payload's two-stage guard takes bot
 7. **The device may refuse to install the front-end app** (Play Protect / Huawei confirmation:
    `INSTALL_FAILED_ABORTED: User rejected permissions`). Disable Play Protect scanning, or
    tap the APK from `/sdcard`.
+8. **The `su` symlink can be missing (measured).** A factory reset wipes all of
+   `/data/local/tmp`. Even when `ghostlock_e --root` succeeds and the `\0gl_su` server is up,
+   if the client `/data/local/tmp/su` (a symlink to `ghostlock_e`) is absent then
+   `su -c true` fails, the restore wrongly concludes "no root server", releases the per-boot
+   lock and retries -> **multiple concurrent exploit runs** (load spike; watchdog / pid-0
+   panic risk). Two fixes: (a) probe with the **name-independent**
+   `ghostlock_e --rshcli 'id -u'` == 0 (fallback `su -c true`); (b) `provision.sh` does
+   `ln -sf ghostlock_e /data/local/tmp/su`. (Sources: `docs/session_20260926/ROOTSHELL_MEMO_20260926.md` §4, `evidence/CHANGE09_neutralize_marker.txt`.)
+9. **Keep `/data/local/tmp/gms_stage` as a plain FILE.** The dangerous old `.rc` payload
+   mounted `lowerdir=/data/local/tmp/gms_stage/{permissions,sysconfig,priv-app}:...`.
+   With `gms_stage` kept as a 0-byte regular file, `gms_stage/<x>` is **ENOTDIR** and those
+   mount lines can never succeed: reset-safe and reboot-persistent belt+braces (the current
+   marker `.rc` has no mount lines at all). (Source: `evidence/CHANGE09_neutralize_marker.txt`.)
 
 ### 13.3 Related
 
@@ -377,3 +390,33 @@ One trigger starts **two** processes and the payload's two-stage guard takes bot
 * Front-end app design (one-tap restore): `ghostlock_app/DESIGN.md` (every claim marked
   measured / to-confirm)
 * Measurement log: `binder_uaf/session_20260922/MRX_W09_GHOSTLOCK_FACTS.md` (9an(1)..(168))
+
+---
+
+## 14. Latest verified state (2026-09-26 addendum, up to the CHANGE 08 neutralization)
+
+- **The injected `/system/etc/init/perfetto.rc` is NEUTRALIZED to a marker payload** (the three
+  dangerous `mount` lines removed; only `setprop gl.boot.injected 1`). Written to EROFS block
+  **`sdd71@139218`** (super phys `570236928` = `139218 x 4096`); marker-block sha256 =
+  **`1be82ca9fba253332ac00e2ee61bbbea061028b440647f8c19f6d03f990238fe`**.
+  **After a cold boot (measured)**: `getprop gl.boot.injected == 1`, **no** `/system` overlay in
+  `mount`, normal boot (uptime OK / `perf_event_paranoid=3`), and `cat
+  /system/etc/init/perfetto.rc` returns the marker content.
+  (Sources: `evidence/CHANGE09_neutralize_marker.txt`,
+  `docs/session_20260926/PERSISTENCE_SAFETY_ARCHITECTURE_20260926.md` §5.)
+- **Persistence, honestly**: a single-block EROFS change is **silently corrected by FEC**
+  (`docs/session_20260926/FEC_ANALYSIS_20260926.md`), and boot-binary replacement is **DEAD**
+  under SELinux (`mounton system_file` is init-only; execs typetransition out of init)
+  (`docs/session_20260926/PERSISTENCE_RAW_SUPER_20260926.md` §47-57,
+  `BL_STATIC_ANALYSIS_20260926.md`). So **native GMS remains per-boot overlay only**
+  (`POSTMORTEM_BRICK_20260926.md`).
+- **The safe boot-hook invariant SI-2 holds on the device**: a `chcon u:object_r:system_file:s0`
+  on `/data/gls` survives a reboot (init does not blanket-restorecon `/data`). The actual
+  boot-time lower-only mount (P3) is **not yet tested**.
+  (Source: `evidence/CHANGE10_label_persistence.txt`.)
+- Added to `docs/session_20260926/`: LATEST_CODE_SUMMARY / PERSISTENCE_SAFETY_ARCHITECTURE /
+  POSTMORTEM_BRICK / FEC_ANALYSIS / PERSISTENCE_RAW_SUPER / ROOTSHELL_MEMO / BL_STATIC_ANALYSIS /
+  CHANGE_01 / CHANGE_02 / CHANGE_08. Added `evidence/CHANGE01-10`.
+- GMS repository: canonical is `scripts/gms_restore.sh` (v6/v7, sha256 `6B023043...`), plus the new
+  **`scripts/restore_root.sh`** (root-only derivation: `--root` + name-independent root probe) and
+  **`scripts/provision.sh`** (recreates `/data/local/tmp/su`). See gms README §3/§8.

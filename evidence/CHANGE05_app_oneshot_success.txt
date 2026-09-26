@@ -1,0 +1,24 @@
+CHANGE 05 evidence — APK oneshot (1 operation) + a11y auto-tap (MRX-W09, 2026-09-26)
+====================================================================================
+User-observed end-to-end run (manual, no adb during the run):
+  cold reboot -> open "GhostLock Restore (MRX-W09)" -> tap "★ 復元 (1操作)" ONCE
+  -> the AccessibilityService auto-taps: 「バグレポートを取得」 -> 「完全レポート」 -> 「報告」
+  -> restore ran;  user reports: "1分で行けた" (done in ~1 minute)
+
+Verified state right after:
+  /proc/mounts: overlay /system/priv-app = 1, /system/etc/permissions = 1, /system/etc/sysconfig = 1  (3/3)
+  com.google.android.gms / com.google.android.gsf / com.android.vending = PRIVILEGED x3
+  crash buffer am_crash = 0 ;  uptime ~2 min (fresh boot) ;  boot.reason = reboot,hwarmi_reboot (not abnormal)
+
+Conclusions:
+  [E1] The APK oneshot is REAL: one user tap on the app + the a11y auto-tap performs the whole restore
+       (the Settings bug-report tap is no longer needed by hand).                    [MEASURED]
+  [E2] Trigger -> root + native-GMS overlay 3/3 + PRIVILEGED x3 in about one minute
+       (covered by CHANGE 04's stage-1 dumpstate kill + AVC-retry all-or-nothing mounts). [MEASURED]
+  [E3] tap lower bound: 1 (the app's 復元 button); the Settings tap is automated by a11y.
+       The app-domain bugreportz itself still cannot trigger (perf stayed 3) - a11y is the mechanism. [MEASURED]
+
+Still to do:
+  - 15-minute stability watch after this restore (no watchdog reboot).
+  - YouTube READ_GSERVICES: one reinstall while GSF is present (or the priv-app allowlist route).
+  - Reinstall flakiness of the APK itself (INSTALL_FAILED_ABORTED) - uninstall + session-install retry.

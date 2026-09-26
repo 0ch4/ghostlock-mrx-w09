@@ -1,0 +1,39 @@
+CHANGE 03 evidence — shield-free PC-less EQUIVALENT restore via --root-gms2
+(MRX-W09, 2026-09-26)
+================================================================================
+Setup: cold boot -> inject_hook(772B, ph=0x300) -> ONE bugreportz -> perf=-1 ->
+       `ghostlock_e_lr2 --root-gms2` (freeze IN-process + shield-free uid-0 child +
+       mount + GMS overlays + ctl.restart zygote).  NO pid-0 shield anywhere.
+
+--- child log (realroot.txt, tail) ---
+root: gms overlays base=/data/local/tmp/glrt priv=0 perm=0 sys=0 errno=0
+root: gms done (framework restarting)
+root: child proof attempted
+root: child entering su_server uid=0
+(previous lines: child commit ok=1, POST uid=0 euid=0 suid=1 ctx=shell,
+ OWN CapEff=  (cap_effective carried CAP_SYS_ADMIN this run))
+
+--- verification after the framework restart (soft reboot, ~60 s) ---
+grep -c "upperdir=/data/local/tmp/glrt/gms" /proc/mounts   -> 3
+dumpsys package com.google.android.gms  -> privateFlags=[ ... PRIVILEGED ]
+dumpsys package com.google.android.gsf  -> privateFlags=[ ... PRIVILEGED ]
+dumpsys package com.android.vending     -> privateFlags=[ ... PRIVILEGED ]
+ps: uid-0 ghostlock_e_lr2 children have REAL pids (6621 / 12031);
+    NO bracketed [ghostlock...] pid-0 task.
+uptime continued (no kernel reboot); perf_event_paranoid = -1.
+
+--- note on the "soft reboot" ---
+`setprop ctl.restart zygote` restarts the Android framework only (PackageManager
+rescan so the overlay priv-apps become PRIVILEGED).  The KERNEL does not reboot.
+sys.boot.reason for the earlier reboot was "reboot,adb" (our deliberate adb reboot),
+NOT a panic; the "Kernel panic - Attempted to kill the idle task!" lines in dropbox
+are historical (pre-change boots with the pid-0 shield).
+
+--- conclusions ---
+[C1] The FULL restore (root + GMS overlay 3/3 + PRIVILEGED x3 + framework restart)
+     runs with NO pid-0 shield.                                        [MEASURED]
+[C2] `--root`/`--root2` base non-determinism fixed: gms_setup.sh now receives the
+     ACTUAL tmpfs base ($1); this run the base was /data/local/tmp/glrt. [MEASURED]
+[C3] Remaining robustness item: the CAP_SYS_ADMIN value (`root_cap_value`) is still
+     found probabilistically (park # raised 12->40); a deterministic .data candidate
+     is the eventual fix.

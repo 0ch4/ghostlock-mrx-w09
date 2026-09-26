@@ -1,0 +1,49 @@
+CHANGE 10 evidence — do chcon'd /data labels survive a reboot? (persistence SI-2)
+MRX-W09, 2026-09-26
+================================================================================
+
+QUESTION (the decisive one for the safe boot-hook design)
+  The safe design (docs/PERSISTENCE_SAFETY_ARCHITECTURE_20260926.md section 4) needs
+  the invariant SI-2: "if the staging exists, its label is already correct", so that the
+  boot-time .rc must NOT chcon at boot (a boot-time chcon failure would let the mount
+  succeed with a WRONG label -> brick).  That requires: a one-time `chcon system_file`
+  on /data/gls must SURVIVE a reboot (i.e. init must not blanket `restorecon` /data).
+
+METHOD (root via the libc open64 hook; no boot-time change)
+  1. arming:  inject_hook place 0x84000 0x300 0x7a3d8 ; hook 0x7a3d4 0x84000 ; ONE bugreportz
+     root:    su -c id -> uid=0(root) ... u:r:shell:s0 ; ghostlock_e --rshcli 'id -u' -> 0
+     (the /data/local/tmp/su -> ghostlock_e symlink is REQUIRED; see CHANGE 09)
+  2. su -c 'mkdir -p /data/gls/priv /data/gls/perm; echo hi > /data/gls/priv/test.apk;
+            touch /data/gls/perm/test.xml; chmod -R a+rX /data/gls;
+            chcon -R u:object_r:system_file:s0 /data/gls'
+     NOTE: `chown -R 0:0` FAILED ("Operation not permitted") because the gl_su child has
+           CapEff=0 (no CAP_CHOWN); files ended up 0:2000.  DAC (a+rX) is what matters for
+           system_server, so this is fine.  (--root-gms does its staging in the uid-0 CHILD
+           which does hold caps, so there chown 0:0 works.)
+  3. cold `reboot`; wait; inspect the labels from a plain adb shell (uid 2000).
+
+RESULT [MEASURED]
+  after chcon :  /data/gls               u:object_r:system_file:s0
+                 /data/gls/priv          u:object_r:system_file:s0
+                 /data/gls/priv/test.apk u:object_r:system_file:s0
+  after reboot:  /data/gls               u:object_r:system_file:s0
+                 /data/gls/priv          u:object_r:system_file:s0
+                 /data/gls/priv/test.apk u:object_r:system_file:s0
+  (uptime 22 s, gl.boot.injected == 1 -> the marker .rc ran; labels UNCHANGED)
+
+CONCLUSION
+  - init does NOT blanket-restorecon /data (the only restorecons in /system/etc/init/*.rc
+    target specific subdirs; /init.rc is not readable from shell).  A one-time chcon on
+    /data/gls PERSISTS across reboots.  => **SI-2 holds [MEASURED]**.
+  - Together with the brick evidence (the overlay merged root inherits the TOP lowerdir's
+    label: shell_data_file -> system_server denied -> bootloop) and CHANGE 04 ("/data upper
+    = EINVAL"), the safe design's preconditions are now satisfied:
+        .rc (post-fs-data): mount overlay RO, lowerdir=/data/gls/<x>:/system/<x>, NO upper,
+        NO boot-time chcon; absence of /data/gls -> mount fails -> normal boot (reset-safe).
+  - STILL UNTESTED (needs a deliberate boot-time change, P3): the actual boot-time
+    lower-only mount at post-fs-data and whether PackageManager marks GMS PRIVILEGED from it.
+
+LEFTOVER STATE
+  /data/gls/{priv,perm} now exist on the device with system_file labels and dummy content
+  (test.apk/test.xml).  Harmless: the current /system/etc/init/perfetto.rc is the MARKER
+  (no mounts at all).  Remove them before real staging.

@@ -371,6 +371,19 @@ nohup /system/bin/bugreportz &
 7. **アプリのインストールが端末に拒否されることがある** — Play Protect / Huawei の確認で
    `INSTALL_FAILED_ABORTED: User rejected permissions`。Play Protect のスキャンを切るか、
    `/sdcard` からタップしてインストールする。
+8. **`su` シンボリックリンクの消失（実測・要注意）** — factory reset は `/data/local/tmp` を
+   丸ごと消す。`ghostlock_e --root` が成功して abstract socket `\0gl_su` の root サーバが
+   上がっていても、**クライアントの `/data/local/tmp/su`（= `ghostlock_e` への symlink）が無いと
+   `su -c true` が失敗**し、restore が「root サーバ無し」と誤判定 → per-boot ロックを解放して
+   再試行 → **exploit の多重同時実行**（load 急増、watchdog / pid-0 panic リスク）になる。
+   対策は 2 つ: (a) 判定を**名前非依存**の `ghostlock_e --rshcli 'id -u'` == 0（fallback
+   `su -c true`）にする、(b) `provision.sh` が `ln -sf ghostlock_e /data/local/tmp/su` を再作成する。
+   （出典: `docs/session_20260926/ROOTSHELL_MEMO_20260926.md` §4、`evidence/CHANGE09_neutralize_marker.txt`）
+9. **`/data/local/tmp/gms_stage` は「通常ファイル」でガード** — 危険だった旧 `.rc` payload は
+   `lowerdir=/data/local/tmp/gms_stage/{permissions,sysconfig,priv-app}:...` を mount していた。
+   `gms_stage` を**0 byte の通常ファイル**のままにしておくと `gms_stage/<x>` は **ENOTDIR** になり、
+   旧 mount 行は決して成功しない。reset 耐性・再起動永続の belt+braces（現在の marker `.rc` は
+   mount 行自体が無い）。（出典: `evidence/CHANGE09_neutralize_marker.txt`）
 
 ### 13.3 関連
 
@@ -387,3 +400,27 @@ nohup /system/bin/bugreportz &
 - **実測**: cold boot → arm → 1トリガ → **約5秒で overlay 3/3** → +30〜60秒で **PRIVILEGED ×3**。**pid-0 タスクは存在しない**。
 - **前面アプリ** `app/`: 「★復元(1操作)」＋AccessibilityService 自動タップ（バグレポートを取得→完全レポート→報告）で復元。
 - 注意: overlay は 1ブート限り。常用は microG+Aurora+ReVanced 推奨。詳細・証拠: `docs/session_20260926/`（STATUS/CHANGE01-06）。
+
+### 14.1 最新検証状態（2026-09-26 追記：CHANGE 08 の無害化まで）
+
+- **注入 `/system/etc/init/perfetto.rc` は marker payload に無害化済み**（危険な `mount` 3 行を削除し
+  `setprop gl.boot.injected 1` のみ）。書き込み先は EROFS ブロック **`sdd71@139218`**
+  （super phys `570236928` = `139218 × 4096`）、marker ブロックの sha256 =
+  **`1be82ca9fba253332ac00e2ee61bbbea061028b440647f8c19f6d03f990238fe`**。
+  **コールドブート後の実測**: `getprop gl.boot.injected == 1`、`mount` に `/system` overlay は**無し**、
+  通常起動（uptime OK / `perf_event_paranoid=3`）、`cat /system/etc/init/perfetto.rc` が marker 内容。
+  （出典: `evidence/CHANGE09_neutralize_marker.txt`、`docs/session_20260926/PERSISTENCE_SAFETY_ARCHITECTURE_20260926.md` §5）
+- **恒久化の現状（正直に）**: EROFS への単一ブロック改変は **FEC が黙って元ブロックへ訂正**するため
+  原理的に効かない（`docs/session_20260926/FEC_ANALYSIS_20260926.md`）。boot バイナリ置換は
+  SELinux（`mounton system_file` は init のみ／exec はドメイン遷移）で **DEAD**
+  （`docs/session_20260926/PERSISTENCE_RAW_SUPER_20260926.md` §47-57、`BL_STATIC_ANALYSIS_20260926.md`）。
+  ⇒ **native GMS は依然 per-boot overlay のみ**（`docs/session_20260926/POSTMORTEM_BRICK_20260926.md`）。
+- **安全な boot-hook 設計の前提 SI-2 は実機成立**: `/data/gls` の `chcon u:object_r:system_file:s0` は
+  再起動を越えて保持される（init は `/data` を一括 restorecon しない）。boot 時 mount 本体（P3）は**未検証**。
+  （出典: `evidence/CHANGE10_label_persistence.txt`）
+- 今回 `docs/session_20260926/` に追加: LATEST_CODE_SUMMARY / PERSISTENCE_SAFETY_ARCHITECTURE /
+  POSTMORTEM_BRICK / FEC_ANALYSIS / PERSISTENCE_RAW_SUPER / ROOTSHELL_MEMO / BL_STATIC_ANALYSIS /
+  CHANGE_01 / CHANGE_02 / CHANGE_08。`evidence/` に CHANGE01–10 を追加。
+- GMS 側（別リポジトリ）: canonical は `scripts/gms_restore.sh`（v6/v7、sha256 `6B023043…`）。
+  これに **`scripts/restore_root.sh`**（root-only 派生。`--root` に変更＋名前非依存の root 判定）と
+  **`scripts/provision.sh`**（`/data/local/tmp/su` symlink を再作成）を追加。詳細は gms README §3/§8。

@@ -1,0 +1,40 @@
+CHANGE 06 — YouTube / READ_GSERVICES persistence (MRX-W09, 2026-09-26)
+====================================================================
+Problem (user-observed): YouTube crashes on playback with
+  SecurityException: ... requires com.google.android.providers.gsf.permission.READ_GSERVICES
+and after every reboot+restore the user had to REINSTALL YouTube again.
+
+Root cause [MEASURED]:
+  * READ_GSERVICES is declared by GSF with prot=normal -> granted ONLY at INSTALL time,
+    to apps that request it while GSF already defines it.  `pm grant` is rejected:
+    "not a changeable permission type".  Re-installing YouTube while GSF is present fixes it.
+  * BUT GSF was present ONLY via the per-boot overlay (/system/priv-app/GoogleServicesFramework).
+    On a cold boot (no overlay) GSF is absent -> the permission definition disappears ->
+    YouTube's recorded grant is invalidated -> it crashes again -> reinstall needed each boot.
+
+Fix (this change):
+  * Install GSF persistently into /data/app so the permission DEFINITION exists on every boot,
+    even before/without the overlay:
+      pm install -r -d /data/local/tmp/gms_stage/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk
+    Result: com.google.android.gsf now has BOTH codePaths:
+      /data/app/com.google.android.gsf-...           (persistent)
+      /system/priv-app/GoogleServicesFramework       (overlay, when the restore ran)
+    The permission is still defined (dumpsys shows READ_GSERVICES present).
+
+Remaining single manual step: reinstall YouTube ONCE while GSF is defined; with GSF now
+persistent the install-time grant should survive reboots.
+
+Verification plan (1 change = 1 check):
+  1. Play Store -> YouTube -> Uninstall -> Install.
+  2. Play a video -> no crash.
+  3. Reboot + run the restore -> play again WITHOUT reinstalling -> no crash  <= the real test.
+
+Follow-up observation (user, 2026-09-26):
+  * After GSF /data install + a restore, the device was NORMAL and stable (overlays 3/3,
+    PRIVILEGED x3, crashes 0) for several minutes.
+  * The user suspects **Picture-in-Picture (PiP) activation** was the trigger of the earlier
+    watchdog hang - consistent with the hungtask whitelist seen in last_kmsg
+    (system_server / surfaceflinger / init) since PiP toggles SurfaceFlinger composition.
+  * => GSF /data is NOT (by itself) the destabiliser.  The watchdog hang is more likely a
+    SurfaceFlinger/PiP interaction (to be reproduced deliberately with pstore capture if needed).
+

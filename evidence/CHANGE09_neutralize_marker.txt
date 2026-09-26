@@ -1,0 +1,63 @@
+CHANGE 09 evidence — NEUTRALIZE the injected .rc (marker) — MRX-W09, 2026-09-26
+================================================================================
+
+GOAL
+  Defuse the "dormant landmine" left by CHANGE 08: /system/etc/init/perfetto.rc was
+  replaced with a payload whose three mount lines used
+      lowerdir=/data/local/tmp/gms_stage/{permissions,sysconfig,priv-app}:...
+  If that staging dir ever exists, the mount SUCCEEDS with a shell_data_file label ->
+  system_server is denied /system/priv-app etc. -> bootloop.  A factory reset once
+  "fixed" it only because it removed /data/local/tmp/gms_stage (the mount then fails).
+
+ACTION
+  Replace the on-disk EROFS block sdd71@139218 with the MARKER payload
+  (mount-free: only `setprop gl.boot.injected 1`).
+
+  expected before : f4c56fbcbc9357c1d659fef1e00220dc3810deb8c333245c9b6f26589d807675
+  written         : perfetto_block_marker.bin
+                    = 1be82ca9fba253332ac00e2ee61bbbea061028b440647f8c19f6d03f990238fe
+
+RESULTS [MEASURED]
+  - root obtained:  /data/local/tmp/su -c id
+                    -> uid=0(root) gid=2000(shell) ... context=u:r:shell:s0
+                    /data/local/tmp/ghostlock_e --rshcli 'id -u' -> 0
+  - current block sha256 == f4c56fbc...   (confirmed the dangerous payload was on disk)
+  - write:
+      su -c 'dd if=/data/local/tmp/perfetto_block_marker.bin of=/dev/block/sdd71 \
+                bs=4096 seek=139218 count=1 conv=notrunc'
+      -> 1+0 records in / 1+0 records out / 4096 bytes copied
+  - read-back sha256 == 1be82ca9...       (marker)
+  - COLD REBOOT verification:
+      getprop gl.boot.injected           == 1            (was 2 before)
+      cat /system/etc/init/perfetto.rc   == "# ---- gl injection probe ----" +
+                                            "on post-fs-data" + "setprop gl.boot.injected 1"
+                                            + "# ---- end probe ----" + '#' padding
+      mount | grep the 3 target dirs      == (none)       no overlay
+      boot                                == normal (uptime OK, perf=3)
+  NOTE: `cat perfetto.rc` immediately AFTER the write still showed the OLD content
+        (stale page cache of the running boot); the disk content was proven by the
+        read-back sha256.  The new content appears after the reboot (verified).
+
+ROOT CAUSE OF THE "SLOW ROOT" (why su was missing) [MEASURED]
+  - `ghostlock_e --root` DID succeed.  Its realroot.txt (uid-0 child log) ends with:
+        root: child POST uid=0 euid=0 suid=1 ctx='u:r:shell:s0'
+        root: OWN CapEff=ffffffcfe0e0bd40 ...
+        root: child proof attempted
+        root: child entering su_server uid=0
+    rooted.txt was written by uid 0.  So the root server \0gl_su WAS UP.
+  - But /data/local/tmp/su (the CLIENT, a symlink to ghostlock_e) did NOT exist: the
+    factory reset wiped /data/local/tmp and nothing recreates `su`.  So `su -c true`
+    failed ("inaccessible or not found"), the restore script wrongly concluded
+    "no root server", released the per-boot lock, and retried -> MULTIPLE concurrent
+    exploit runs (load spike, watchdog/pid-0 panic risk).
+  - FIX (applied in the FAST glboot.sh):
+      * create /data/local/tmp/su -> ghostlock_e          (ROOTSHELL_MEMO 4)
+      * detect root with the NAME-INDEPENDENT client mode
+        `ghostlock_e --rshcli 'id -u'` == 0               (ROOTSHELL_MEMO 4)
+    With this, root came up in ~10-25 s.
+
+EXTRA DEFENSE-IN-DEPTH (no root required)
+  - /data/local/tmp/gms_stage is kept as a regular FILE (0 bytes): `gms_stage/<x>` is
+    then ENOTDIR, so even the OLD mount lines could never succeed.  reset-safe and
+    reboot-persistent.
+  - After CHANGE 09 the marker .rc has NO mounts at all, so this is now belt+braces.

@@ -1,0 +1,33 @@
+CHANGE 07 — failed-run lock release (MRX-W09, 2026-09-26)
+=========================================================
+Symptom: APK oneshot polled `perf=-1 gms=0/3` for >105 s; `/proc/mounts` had 0 overlays;
+`glroot.log` was flooded with `stage2: boot <btime> already handled -> exiting (no second
+exploit run)`.
+
+Detailed log analysis [MEASURED]:
+  * The app oneshot DOES fire the shell-domain stage2: glroot.log shows `ctx=u:r:shell:s0`
+    entries.  So the a11y -> bugreportz -> u:r:shell:s0 trigger works (functionally identical
+    to the adb `bugreportz` trigger).  It is NOT true that "the one-shot never worked".
+  * The failing run's gl.klog:
+        root: enter / priming / park W=... node=...
+        root: parked=1
+        freeze: PROBE node+00 q0=c1400b27026cbeb6 q1=5464ad4d1f5aadb2   <- GARBAGE (not node|1)
+        freeze: PROBE node+38 q0=c1400b27026cbeb6 q1=5464ad4d1f5aadb2   <- GARBAGE
+        root: PERM_HIGH w=0 / PERM_NODE w=0
+        root: ACCESS-ORACLE kernel=0 shell=0 (bit0=PERMISSIVE)          <- permissive NOT set
+    i.e. the freeze PARK occasionally misses (the window/node is not where expected), the
+    permissive patch then points at a bad node, and the exploit can never mount.
+  * CRITICAL: the one-restore-per-boot lock (mkdir .glboot.<btime>) is taken AFTER the perf
+    gate and BEFORE the exploit; the old script NEVER released it on failure, so ONE flaky
+    run bricked the whole boot (`already handled` forever).  (A separate issue from the
+    earlier bootstrap bug: this one is the FAILED-run case.)
+
+Fix (this change): on a FAILED run (no gl_su server, or overlays != 3/3) the script now
+`rmdir`s the per-boot lock and clears the markers, so a later trigger can RETRY within the
+same boot.  The lock still prevents a SECOND SUCCESSFUL run (which would double-mount and
+reset the device).
+
+Still open:
+  * the freeze PARK occasionally missing (garbage node) -> should retry the freeze inside the
+    exploit before proceeding (separate 1-change).
+  * the Huawei watchdog reset (system_server/surfaceflinger hung) - separate.
