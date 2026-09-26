@@ -107,11 +107,24 @@ while [ $i -lt 120 ]; do
     i=$((i+1))
 done
 if ! $D/su -c true >/dev/null 2>&1; then
-    echo "ABORT: the gl_su root command server never came up"
+    echo "ABORT: the gl_su root command server never came up -> releasing the per-boot lock for a retry"
+    rmdir "$D/.glboot.$BID" 2>/dev/null
+    rm -f $D/.glp0 $D/.glp2 2>/dev/null
     exit 1
 fi
 echo "root server ready (after $((i*2)) s)"
-echo "overlays mounted: $(toybox grep -cE "upperdir=[^ ]*/gms/upper-priv" /proc/mounts 2>/dev/null)/3"
+ovl=$(toybox grep -cE "upperdir=[^ ]*/gms/upper-priv" /proc/mounts 2>/dev/null)
+echo "overlays mounted: $ovl/3"
+if [ "$ovl" != "3" ]; then
+    # A FAILED run must NOT brick the boot: the per-boot lock only exists to stop a
+    # SECOND SUCCESSFUL run (double overlay -> reset).  Release it so a later trigger
+    # can retry.  (Measured: the freeze occasionally misses, permissive stays 0, and the
+    # old script left the lock -> every later stage2 said "already handled".)
+    echo "ABORT: overlays incomplete ($ovl/3) -> releasing the per-boot lock for a retry"
+    rmdir "$D/.glboot.$BID" 2>/dev/null
+    rm -f $D/.glp0 $D/.glp2 2>/dev/null
+    exit 1
+fi
 echo "(the framework restart is issued by --root-gms itself)"
 
 # ---- re-arm for the next boot ---------------------------------------------------
