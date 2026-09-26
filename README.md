@@ -320,3 +320,60 @@ mount id も一致）、別の `adb shell` も `system_server`（slave clone）�
 （`glsh -c id` は uid=2000、`glsh -p -c id` は euid=0）を誤診したものでした。`setns("/proc/1/ns/mnt")`
 は不要です（Huawei の `mntns_install` は `CAP_SYS_CHROOT` も要求するため EPERM になる）。
 `mount -t overlay` も実 `/system` lowerdir で動作確認済みで、GMS の `/system` overlay の前提が整いました。
+
+## 13. 2026-09-26 追記：PC なし復元が実機で完成（+36 秒）と運用上の落とし穴
+
+### 13.1 実測済みの復元手順（PC なし・1 トリガ）
+
+`/data/local/tmp` に `shellcode.bin`（payload）/`glboot.sh`/`gms_setup.sh`/`ghostlock_e`/`gms_stage` がある状態で:
+
+```sh
+# 1) enabler を張る（Mali ページキャッシュ書き込み・RAM のみ）
+inject_hook place 0x84000 <payload_size-4> 0x7a3d8     # payload 720 B なら 0x2cc
+inject_hook hook  0x7a3d4 0x84000
+
+# 2) 1 回だけトリガ（= 設定 → 開発者向けオプション → バグレポートを取得 と同じ経路）
+nohup /system/bin/bugreportz &
+```
+
+**実測（コールドブートから）**: `+36 秒` で `perf_event_paranoid=-1`、overlay 3 本
+（`/system/priv-app`, `/system/etc/permissions`, `/system/etc/sysconfig`）が付き、
+`com.google.android.gms` / `com.google.android.gsf` / `com.android.vending` が **PRIVILEGED**。
+
+1 回のトリガで **2 つのプロセス**が立ち、payload の 2 段ガードが両方を受けます:
+
+| プロセス | uid | ドメイン | perf 書込 | `shell_data_file` exec |
+|---|---|---|---|---|
+| `bugreportz`（`com.android.shell` が起動） | 2000 | **u:r:shell:s0** | ✗ | **✓ 唯一** |
+| `dumpstate`（init が起動） | 0 | u:r:dumpstate:s0 | ✓（CapEff=`0000007fffffffff`） | ✗ |
+
+### 13.2 落とし穴（すべて実測・再発防止用）
+
+1. **能力の無い uid-0 ドメインが stage1 を食う** — `u:r:installd:s0` は
+   perf を書けず（EACCES）、CAP_DAC_OVERRIDE も無いのでマーカーを消せない。
+   ⇒ payload は **「perf を先に書いて、書けた時だけ claim」** が必須。無いと
+   `[-] KASLR leak failed`（`ghostlock_mrx_e.c:3365`）で数分浪費して失敗する。
+2. **su サーバ（`\0gl_su`）では overlay を貼れない** — 子が
+   `CapEff=0000000000000000` / `CapBnd=0x00000000000000c0` なので `mount(2)` は EPERM、
+   `/data/local/tmp`（`shell:shell 0771`）への `mkdir` も EACCES。overlay を貼れるのは
+   **exploit 自身の uid-0 子（`ghostlock_e --root-gms`）だけ**。
+3. **`/dev` はマーカーに使えない** — `tmpfs 0755 root:root` のため uid-2000 は DAC で不可、
+   dumpstate ドメインは SELinux で拒否。マーカーは `/data/local/tmp` に置くしかない。
+4. **マーカーは再起動で消えない** — 両方残ったブートは payload が EEXIST で return し、
+   誰も復元できない（アプリも installd も unlink 不可）。⇒ 成功時に掃除する、
+   または uid-0 経路で古い `.glp2` を消す運用が必要（設計上の残課題）。
+5. **同一ブートで exploit を 2 回走らせない** — 実測で**リセット**する（FACTS 9an(164)D）。
+   `inject_hook restore` も同一ブートでは禁止（Mali 書き込みの 2 回目）。
+6. **Play の自己更新が「破壊」の正体** — ログインすると GMS/Play が `/data/app` へ更新され、
+   システム実体は毎ブートの overlay 側だけなので、次のコールドブートで
+   **特権を失った `/data` コピーが特権コンポーネントを要求してクラッシュループ**
+   （`INTERACT_ACROSS_USERS` / `MANAGE_USERS`）。⇒ 自動更新は OFF、または Aurora Store。
+7. **アプリのインストールが端末に拒否されることがある** — Play Protect / Huawei の確認で
+   `INSTALL_FAILED_ABORTED: User rejected permissions`。Play Protect のスキャンを切るか、
+   `/sdcard` からタップしてインストールする。
+
+### 13.3 関連
+
+- GMS 導入手引き（別リポジトリ）: https://github.com/0ch4/ghostlock-mrx-w09-gms
+- 前面アプリ（1 タップ復元）の設計: `ghostlock_app/DESIGN.md`（実測 / 要確認を明記）
+- 実測ログ: `binder_uaf/session_20260922/MRX_W09_GHOSTLOCK_FACTS.md`（9an(1)〜(168)）

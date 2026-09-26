@@ -315,3 +315,65 @@ Key technical constraint: the write primitive can only store a **kernel pointer*
 it cannot store **small integers** (e.g. `ebitmap_node.startbit`).  Arbitrary bytes are therefore only
 available through a **resident stamp window** (from `copy_from_user`), which is the key to complete
 root.  See `docs/FACTS.md` (9an(1)-(150)) and `docs/static-analysis/*_20260926.md`.
+
+## 13. 2026-09-26 addendum: the PC-less restore is complete (+36 s) and the operational traps
+
+### 13.1 The measured procedure (PC-less, one trigger)
+
+With `shellcode.bin` (the payload), `glboot.sh`, `gms_setup.sh`, `ghostlock_e` and `gms_stage`
+present in `/data/local/tmp`:
+
+```sh
+# 1) arm the enabler (a Mali page-cache write; RAM only)
+inject_hook place 0x84000 <payload_size-4> 0x7a3d8     # 0x2cc for a 720 B payload
+inject_hook hook  0x7a3d4 0x84000
+
+# 2) exactly ONE trigger (= Settings > Developer options > Take bug report)
+nohup /system/bin/bugreportz &
+```
+
+**Measured from a cold boot**: at **+36 s** `perf_event_paranoid=-1`, the three overlays
+(`/system/priv-app`, `/system/etc/permissions`, `/system/etc/sysconfig`) are mounted, and
+`com.google.android.gms` / `com.google.android.gsf` / `com.android.vending` are all
+**PRIVILEGED**.
+
+One trigger starts **two** processes and the payload's two-stage guard takes both:
+
+| process | uid | domain | may write perf | may exec `shell_data_file` |
+|---|---|---|---|---|
+| `bugreportz` (started by `com.android.shell`) | 2000 | **u:r:shell:s0** | no | **yes (the only one)** |
+| `dumpstate` (started by init) | 0 | u:r:dumpstate:s0 | yes (CapEff=`0000007fffffffff`) | no |
+
+### 13.2 Traps (all measured; read before reusing the machinery)
+
+1. **A capability-less uid-0 domain consumes stage 1.** `u:r:installd:s0` cannot write perf
+   (EACCES) and has no CAP_DAC_OVERRIDE to unlink its marker either. The payload must therefore
+   **write perf first and only claim the one-shot when that write succeeded**; otherwise the
+   exploit dies with `[-] KASLR leak failed` (`ghostlock_mrx_e.c:3365`) after wasting minutes.
+2. **The su server (`\0gl_su`) cannot mount.** Its child has `CapEff=0000000000000000`,
+   `CapBnd=0x00000000000000c0`, so `mount(2)` -> EPERM and `mkdir` in `/data/local/tmp`
+   (`shell:shell 0771`) -> EACCES. Only the **exploit's own uid-0 child
+   (`ghostlock_e --root-gms`)** can mount, stage and restart the framework.
+3. **`/dev` cannot hold a marker.** It is `tmpfs 0755 root:root`: a uid-2000 process fails on
+   DAC and the dumpstate domain is refused by SELinux. Markers can only live in
+   `/data/local/tmp`.
+4. **Markers survive reboots.** If both are present at boot the payload returns on EEXIST and
+   nothing can restore (neither the app nor installd can unlink them). Releasing them on
+   success - or unlinking a stale `.glp2` from the uid-0 path - is a known open item.
+5. **Never run the exploit twice in one boot** - it resets the device (FACTS 9an(164)D).
+   `inject_hook restore` in the same boot is the same hazard (a second Mali write).
+6. **The Play self-update is what "corrupts" the device.** Signing in makes GMS/Play update
+   into `/data/app`; their system base only ever existed in the per-boot overlay, so the next
+   cold boot leaves a non-privileged `/data` copy that requests privileged components
+   (`INTERACT_ACROSS_USERS`, `MANAGE_USERS`) and crash-loops. Turn auto-update OFF, or use
+   Aurora Store.
+7. **The device may refuse to install the front-end app** (Play Protect / Huawei confirmation:
+   `INSTALL_FAILED_ABORTED: User rejected permissions`). Disable Play Protect scanning, or
+   tap the APK from `/sdcard`.
+
+### 13.3 Related
+
+* GMS guide (separate repository): https://github.com/0ch4/ghostlock-mrx-w09-gms
+* Front-end app design (one-tap restore): `ghostlock_app/DESIGN.md` (every claim marked
+  measured / to-confirm)
+* Measurement log: `binder_uaf/session_20260922/MRX_W09_GHOSTLOCK_FACTS.md` (9an(1)..(168))
